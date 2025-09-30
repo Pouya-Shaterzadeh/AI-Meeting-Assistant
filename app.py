@@ -538,46 +538,13 @@ class MeetingAssistant:
             return error_msg, None
     
     def _generate_meeting_report(self, transcript, summary, actions, sentiment, topics):
-        """Generate comprehensive meeting report with enhanced formatting"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """Generate meeting report in the exact format from the attached image"""
         
-        return f"""# 🎯 AI Meeting Analysis Report
-**Generated:** {timestamp} | **Powered by:** Advanced ChatPromptTemplate Chains
-
----
-
-## 📋 Executive Summary
+        return f"""Meeting Minutes:
 {summary}
 
----
-
-## ✅ Action Items & Tasks (ChatPromptTemplate Enhanced)
-{actions}
-
----
-
-## 💭 Meeting Sentiment & Tone
-{sentiment}
-
----
-
-## 🔑 Key Topics & Themes
-{topics}
-
----
-
-## 📝 Complete Meeting Transcript
-{transcript}
-
----
-
-### 🔧 Processing Details
-- **AI Enhancement**: ChatPromptTemplate chains following LangChain documentation
-- **Task Extraction**: Advanced pattern matching with prompt engineering
-- **Performance**: Ultra-fast processing with lazy loading
-- **Quality**: Enhanced accuracy through structured prompt templates
-
-*This analysis uses advanced ChatPromptTemplate and chain-based processing as recommended in the LangChain documentation for maximum accuracy and speed.*"""
+Task List:
+{actions}"""
 
 
 def create_interface():
