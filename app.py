@@ -511,18 +511,6 @@ class MeetingAssistant:
             
             total_time = time.time() - start_time
             
-            # Add performance metrics
-            performance_info = f"""
-
----
-⚡ **Ultra-Fast Processing Performance**
-• Total time: {total_time:.2f} seconds
-• Transcription: {transcript_time:.2f}s
-• Analysis: {analysis_time:.2f}s
-• Used ChatPromptTemplate chains for enhanced accuracy
-• Lazy loading optimization active"""
-            
-            meeting_minutes += performance_info
             
             # Create download file
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', prefix='meeting_minutes_')
