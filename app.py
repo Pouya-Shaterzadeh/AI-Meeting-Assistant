@@ -547,9 +547,57 @@ def create_interface():
                     with gr.Column(scale=1):
                         gr.HTML("""
                         <div style="display: flex; justify-content: center; align-items: center; height: 120px;">
-                            <img src="https://i.imgur.com/YourWorkflowImage.png" 
-                                 alt="AI Meeting Assistant Workflow" 
-                                 style="max-width: 100%; max-height: 100%; opacity: 0.7; object-fit: contain;" />
+                            <svg width="200" height="100" viewBox="0 0 800 400" style="max-width: 100%; max-height: 100%; opacity: 0.7;">
+                                <!-- Meeting Recording -->
+                                <rect x="20" y="50" width="80" height="60" rx="8" fill="#667eea" opacity="0.8"/>
+                                <text x="60" y="75" text-anchor="middle" fill="white" font-size="20">🎤</text>
+                                <text x="60" y="95" text-anchor="middle" fill="white" font-size="8">Meeting</text>
+                                
+                                <!-- Arrow -->
+                                <path d="M110 80 L140 80 M135 75 L140 80 L135 85" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                
+                                <!-- Transcribe -->
+                                <rect x="150" y="50" width="80" height="60" rx="8" fill="#f093fb" opacity="0.8"/>
+                                <text x="190" y="75" text-anchor="middle" fill="white" font-size="16">🧠</text>
+                                <text x="190" y="90" text-anchor="middle" fill="white" font-size="6">Whisper</text>
+                                <text x="190" y="100" text-anchor="middle" fill="white" font-size="8">Transcribe</text>
+                                
+                                <!-- Arrow -->
+                                <path d="M240 80 L270 80 M265 75 L270 80 L265 85" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                
+                                <!-- Clean-Up -->
+                                <rect x="280" y="50" width="80" height="60" rx="8" fill="#667eea" opacity="0.8"/>
+                                <text x="320" y="75" text-anchor="middle" fill="white" font-size="16">👤</text>
+                                <text x="320" y="90" text-anchor="middle" fill="white" font-size="6">LLAMA 3.2</text>
+                                <text x="320" y="100" text-anchor="middle" fill="white" font-size="8">Clean-Up</text>
+                                
+                                <!-- Arrow -->
+                                <path d="M370 80 L400 80 M395 75 L400 80 L395 85" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                
+                                <!-- Minutes Generator -->
+                                <rect x="410" y="50" width="80" height="60" rx="8" fill="#667eea" opacity="0.8"/>
+                                <text x="450" y="75" text-anchor="middle" fill="white" font-size="16">👤</text>
+                                <text x="450" y="90" text-anchor="middle" fill="white" font-size="6">Granite 3.0</text>
+                                <text x="450" y="100" text-anchor="middle" fill="white" font-size="8">Minutes</text>
+                                
+                                <!-- Arrow -->
+                                <path d="M500 80 L530 80 M525 75 L530 80 L525 85" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                
+                                <!-- Gradio Interface -->
+                                <rect x="540" y="50" width="80" height="60" rx="8" fill="#667eea" opacity="0.8"/>
+                                <text x="580" y="75" text-anchor="middle" fill="white" font-size="20">💻</text>
+                                <text x="580" y="95" text-anchor="middle" fill="white" font-size="8">Gradio</text>
+                                
+                                <!-- Supporting Tools -->
+                                <rect x="280" y="150" width="160" height="40" rx="8" fill="#4a4a4a" opacity="0.6" stroke="#4ecdc4" stroke-width="1"/>
+                                <text x="310" y="165" fill="white" font-size="12">📄</text>
+                                <text x="325" y="175" fill="#cccccc" font-size="8">Prompt Template</text>
+                                <text x="370" y="165" fill="white" font-size="12">🔗</text>
+                                <text x="385" y="175" fill="#cccccc" font-size="8">LangChain</text>
+                                
+                                <!-- Title -->
+                                <text x="360" y="25" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="bold">AI Meeting Assistant Workflow</text>
+                            </svg>
                         </div>
                         """)
                     
