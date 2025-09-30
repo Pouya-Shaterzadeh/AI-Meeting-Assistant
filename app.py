@@ -19,37 +19,25 @@ logging.basicConfig(level=logging.INFO)
 
 class MeetingAssistant:
     def __init__(self):
-        """Initialize the Meeting Assistant with enhanced AI models"""
-        # Load models
-        self.whisper_model = whisper.load_model("medium")
+        """Initialize the AI Meeting Assistant with lazy loading for faster startup"""
+        logging.basicConfig(level=logging.INFO)
+        logging.info("===== Application Startup at %s =====", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         
-        # Initialize other models
-        try:
-            self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-        except Exception as e:
-            logging.warning(f"Could not load summarization model: {e}")
-            self.summarizer = None
-            
-        try:
-            self.sentiment_analyzer = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
-        except Exception as e:
-            logging.warning(f"Could not load sentiment model: {e}")
-            self.sentiment_analyzer = None
+        # Initialize models as None - will be loaded on first use (lazy loading)
+        self.whisper_model = None
+        self.summarizer = None
+        self.sentiment_analyzer = None
         
-        # Initialize translation models for output text translation
-        self.translation_models = {}
-        self.init_translation_models()
-        
-        # Initialize advanced NLP processing chains and templates
-        self.init_processing_chains()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=100,
-            separators=["\n\n", "\n", ".", "!", "?", ",", " ", ""]
-        )
+        # Flags to track model loading status
+        self._whisper_loaded = False
+        self._summarizer_loaded = False
+        self._sentiment_loaded = False
     
     def init_translation_models(self):
-        """Initialize translation models for fast text-to-text translation"""
+        """Initialize translation models for fast text-to-text translation (lazy loading)"""
+        if self._translation_loaded:
+            return
+            
         translation_configs = {
             'persian': 'Helsinki-NLP/opus-mt-en-fa',
             'turkish': 'Helsinki-NLP/opus-mt-en-tr', 
@@ -65,68 +53,75 @@ class MeetingAssistant:
                 logging.info(f"Loaded {lang} translation model")
             except Exception as e:
                 logging.warning(f"Could not load {lang} translation model: {e}")
-                self.translation_models[lang] = None
+        
+        self._translation_loaded = True
 
     def translate_text(self, text, target_language):
-        """Fast text-to-text translation for output results"""
-        if not text or target_language not in self.translation_models:
-            return text
+        """Translate text to target language using fast text-to-text models"""
+        # Lazy load translation models only when needed
+        if not self._translation_loaded:
+            self.init_translation_models()
             
-        model_info = self.translation_models[target_language]
-        if model_info is None:
-            return f"[Translation to {target_language} unavailable]\n\n{text}"
-            
+        if target_language not in self.translation_models:
+            return f"Translation to {target_language} not available"
+        
         try:
-            model = model_info['model']
-            tokenizer = model_info['tokenizer']
+            model_data = self.translation_models[target_language]
+            model = model_data['model']
+            tokenizer = model_data['tokenizer']
             
-            # Split text into chunks for translation (faster processing)
-            max_length = 400
-            chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
-            translated_chunks = []
+            # Speed optimizations for translation
+            inputs = tokenizer(
+                text, 
+                return_tensors="pt", 
+                padding=True, 
+                truncation=True, 
+                max_length=256  # Reduced for speed
+            )
+            translated = model.generate(
+                **inputs, 
+                max_length=256,  # Reduced for speed
+                num_beams=1,  # Faster single beam
+                early_stopping=True,
+                do_sample=False  # Deterministic for speed
+            )
+            result = tokenizer.decode(translated[0], skip_special_tokens=True)
             
-            for chunk in chunks[:6]:  # Limit chunks for speed
-                if len(chunk.strip()) > 5:
-                    inputs = tokenizer.encode(chunk, return_tensors="pt", truncation=True, max_length=400)
-                    outputs = model.generate(inputs, max_length=500, num_beams=2, early_stopping=True)
-                    translated = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                    translated_chunks.append(translated)
-                    
-            return ' '.join(translated_chunks)
+            return result
         except Exception as e:
             logging.error(f"Translation error for {target_language}: {e}")
-            return f"[Translation Error]\n\n{text}"
+            return f"Translation to {target_language} failed: {str(e)}"
     
     def extract_summary(self, text: str) -> str:
-        """Extract summary using enhanced ChatPromptTemplate approach"""
+        """Extract summary using optimized processing"""
         try:
-            # First try AI-based summarization if available
+            # Lazy load summarizer only when needed
+            if not self._summarizer_loaded:
+                self.init_summarizer()
+            
+            # For speed, limit text length and use fewer chunks
             if self.summarizer and len(text) > 100:
-                # Split text into manageable chunks
-                max_chunk = 1000
+                # Smaller chunks and process fewer for speed
+                max_chunk = 512  # Reduced chunk size for faster processing
                 chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
                 
                 summaries = []
-                for chunk in chunks[:3]:  # Process first 3 chunks
-                    if len(chunk.strip()) > 50:
-                        summary = self.summarizer(chunk, max_length=130, min_length=30, do_sample=False)
+                for chunk in chunks[:2]:  # Process only first 2 chunks for speed
+                    if len(chunk.strip()) > 30:
+                        summary = self.summarizer(
+                            chunk, 
+                            max_length=80,  # Shorter summaries for speed
+                            min_length=20, 
+                            do_sample=False,
+                            num_beams=2  # Fewer beams for speed
+                        )
                         summaries.append(summary[0]['summary_text'])
                 
                 if summaries:
-                    # Enhance AI summary with structured template approach
-                    ai_summary = " ".join(summaries)
-                    return self._process_with_chain(
-                        template=self.summary_template,
-                        context=text,
-                        fallback_method=lambda x: ai_summary
-                    )
+                    return " ".join(summaries)
             
-            # Use structured template-based approach
-            return self._process_with_chain(
-                template=self.summary_template,
-                context=text,
-                fallback_method=self._fallback_summary
-            )
+            # Fast fallback method
+            return self._fallback_summary(text)
             
         except Exception as e:
             logging.error(f"Error in summarization: {e}")
@@ -628,6 +623,53 @@ class MeetingAssistant:
         
         return meeting_minutes
     
+    def process_meeting_simple(self, audio_file):
+        """Fast processing method with speed optimizations"""
+        if audio_file is None:
+            return "", None
+        
+        import time
+        start_time = time.time()
+        
+        try:
+            # Fast transcription with optimizations
+            transcript = self.transcribe_audio(audio_file)
+            if transcript.startswith("Error"):
+                return transcript, None
+            
+            # Parallel processing for speed (simulate with sequential but optimized calls)
+            logging.info("Starting fast analysis pipeline...")
+            
+            # Generate analysis components with speed optimizations
+            summary = self.extract_summary(transcript)
+            action_items = self.extract_action_items(transcript)
+            sentiment = self.analyze_sentiment(transcript)
+            key_topics = self.extract_key_topics(transcript)
+            
+            # Generate meeting minutes
+            meeting_minutes = self.generate_meeting_minutes(
+                transcript, summary, action_items, sentiment, key_topics
+            )
+            
+            # Create downloadable file
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', prefix='meeting_minutes_')
+            temp_file.write(meeting_minutes)
+            temp_file.close()
+            
+            processing_time = time.time() - start_time
+            logging.info(f"Fast processing completed in {processing_time:.2f} seconds")
+            
+            # Add performance info to the meeting minutes
+            performance_note = f"\n\n---\n⚡ **Performance**: Processed in {processing_time:.2f} seconds with speed optimizations\n"
+            meeting_minutes += performance_note
+            
+            return meeting_minutes, temp_file.name
+            
+        except Exception as e:
+            error_msg = f"Error processing meeting: {str(e)}"
+            logging.error(error_msg)
+            return error_msg, None
+    
     def process_meeting(self, audio_file, enable_persian=False, enable_turkish=False, enable_arabic=False):
         """Process meeting audio and extract insights with optional translation"""
         if audio_file is None:
@@ -673,137 +715,55 @@ class MeetingAssistant:
             return tuple([error_msg] + [""] * 8)
     
     def create_interface(self):
-        """Create the Gradio interface"""
-        with gr.Blocks(theme=gr.themes.Soft(), title="🎯 AI Meeting Assistant") as demo:
-            gr.HTML("""
-            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 20px;">
-                <h1 style="color: white; margin: 0; font-size: 2.5em;">🎯 AI Meeting Assistant</h1>
-                <p style="color: white; margin: 10px 0 0 0; opacity: 0.9;">Transform your meetings into actionable insights with AI analysis</p>
-            </div>
+        """Create the Gradio interface matching the reference image"""
+        with gr.Blocks(theme=gr.themes.Soft(), title="AI Meeting Assistant") as demo:
+            gr.Markdown("""
+            # AI Meeting Assistant
+            
+            Upload an audio file of a meeting. This tool will transcribe the audio, fix product-related terminology, and generate meeting minutes along with a list of tasks.
             """)
             
             with gr.Row():
                 with gr.Column(scale=1):
+                    # Audio input - matches the reference image
                     audio_input = gr.Audio(
-                        label="📤 Upload Meeting Audio", 
-                        type="filepath",
-                        elem_id="audio-upload"
+                        label="Upload your audio file",
+                        type="filepath"
                     )
                     
-                    # Translation options for output
-                    gr.HTML("<h4>🌍 Translate Results To:</h4>")
-                    with gr.Row():
-                        persian_check = gr.Checkbox(label="فارسی (Persian)", value=False)
-                        turkish_check = gr.Checkbox(label="Türkçe (Turkish)", value=False)
-                        arabic_check = gr.Checkbox(label="العربية (Arabic)", value=False)
-                    
-                    submit_btn = gr.Button(
-                        "🚀 Analyze Meeting", 
-                        variant="primary", 
-                        size="lg"
-                    )
-            
-            # Output sections
-            gr.HTML("<h2>📊 Meeting Analysis Results</h2>")
-            
-            meeting_output = gr.Textbox(
-                label="📋 Complete Meeting Minutes",
-                lines=10,
-                max_lines=20
-            )
-            
-            with gr.Row():
-                with gr.Column():
-                    transcript_output = gr.Textbox(
-                        label="📝 Full Transcript",
-                        lines=8,
-                        max_lines=15
-                    )
-                    summary_output = gr.Textbox(
-                        label="📄 Meeting Summary", 
-                        lines=6,
-                        max_lines=10
-                    )
+                    # Submit button
+                    submit_btn = gr.Button("Submit", variant="primary")
                 
-                with gr.Column():
-                    tasks_output = gr.Textbox(
-                        label="✅ Action Items & Tasks",
-                        lines=6,
-                        max_lines=10
+                with gr.Column(scale=1):
+                    # Output section - matches the reference image
+                    output_text = gr.Textbox(
+                        label="Meeting Minutes and Tasks",
+                        lines=15,
+                        max_lines=20,
+                        placeholder="Meeting analysis will appear here...",
+                        show_copy_button=True
                     )
-                    sentiment_output = gr.Textbox(
-                        label="💭 Sentiment Analysis",
-                        lines=4,
-                        max_lines=8
-                    )
-                    topics_output = gr.Textbox(
-                        label="🔑 Key Topics",
-                        lines=4,
-                        max_lines=8
-                    )
-            
-            # Translation outputs (only show when enabled)
-            gr.HTML("<h3>🌍 Translated Results</h3>")
-            
-            persian_output = gr.Textbox(
-                label="📄 Persian Output (فارسی)",
-                lines=8,
-                max_lines=15,
-                visible=False
-            )
-            
-            turkish_output = gr.Textbox(
-                label="📄 Turkish Output (Türkçe)",
-                lines=8,
-                max_lines=15,
-                visible=False
-            )
-            
-            arabic_output = gr.Textbox(
-                label="📄 Arabic Output (العربية)",
-                lines=8,
-                max_lines=15,
-                visible=False
-            )
-            
-            # Download section
-            gr.HTML("""
-            <div style="margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 10px; text-align: center;">
-                <h3 style="color: #333;">📥 Download the Generated Meeting Minutes and Tasks</h3>
-                <p style="color: #666;">Your comprehensive meeting analysis is ready for download</p>
-            </div>
-            """)
+                    
+                    # Download section
+                    gr.Markdown("### Download the Generated Meeting Minutes and Tasks")
+                    download_file = gr.File(label="meeting_minutes_and_tasks.txt", visible=False)
             
             # Event handlers
             submit_btn.click(
-                fn=self.process_meeting,
-                inputs=[audio_input, persian_check, turkish_check, arabic_check],
-                outputs=[
-                    meeting_output, transcript_output, summary_output, 
-                    tasks_output, sentiment_output, topics_output,
-                    persian_output, turkish_output, arabic_output
-                ]
+                fn=self.process_meeting_simple,
+                inputs=[audio_input],
+                outputs=[output_text, download_file],
+                show_progress=True
             )
-            
-            # Show/hide translation outputs based on checkbox states
-            def update_translation_visibility(persian_enabled, turkish_enabled, arabic_enabled):
-                return (
-                    gr.update(visible=persian_enabled),
-                    gr.update(visible=turkish_enabled), 
-                    gr.update(visible=arabic_enabled)
-                )
-            
-            for checkbox in [persian_check, turkish_check, arabic_check]:
-                checkbox.change(
-                    fn=update_translation_visibility,
-                    inputs=[persian_check, turkish_check, arabic_check],
-                    outputs=[persian_output, turkish_output, arabic_output]
-                )
-            
+        
         return demo
 
-# Initialize and launch
+# Initialize and launch with speed optimizations
 if __name__ == "__main__":
+    print("🚀 Starting AI Meeting Assistant with speed optimizations...")
+    print("⚡ Using lazy loading for faster startup")
+    print("🧠 Models will load only when needed")
+    
     assistant = MeetingAssistant()
     demo = assistant.create_interface()
     demo.launch()
