@@ -543,71 +543,73 @@ def create_interface():
                 
                 # Download section with workflow image on the left
                 with gr.Row():
-                    # Left side: Workflow image (transparent)
+                    # Left side: Workflow image (transparent) - Much larger to match download area
                     with gr.Column(scale=1):
                         gr.HTML("""
-                        <div style="display: flex; justify-content: center; align-items: center; height: 140px; padding: 10px;">
-                            <svg width="100%" height="100%" viewBox="0 0 600 120" style="max-width: 100%; max-height: 100%; opacity: 0.8;">
+                        <div style="display: flex; justify-content: center; align-items: center; min-height: 200px; padding: 15px;">
+                            <svg width="100%" height="100%" viewBox="0 0 800 180" style="max-width: 100%; max-height: 100%; opacity: 0.85;">
                                 <!-- Title -->
-                                <text x="300" y="15" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="bold">AI Meeting Assistant Workflow</text>
+                                <text x="400" y="25" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="bold">AI Meeting Assistant Workflow</text>
                                 
                                 <!-- Meeting Recording -->
-                                <rect x="10" y="25" width="70" height="50" rx="8" fill="#667eea" opacity="0.9"/>
-                                <text x="45" y="45" text-anchor="middle" fill="white" font-size="16">🎤</text>
-                                <text x="45" y="58" text-anchor="middle" fill="white" font-size="8" font-weight="bold">Meeting</text>
-                                <text x="45" y="68" text-anchor="middle" fill="white" font-size="7">Recording</text>
+                                <rect x="20" y="40" width="100" height="70" rx="12" fill="#667eea" opacity="0.9"/>
+                                <text x="70" y="70" text-anchor="middle" fill="white" font-size="24">🎤</text>
+                                <text x="70" y="88" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Meeting</text>
+                                <text x="70" y="102" text-anchor="middle" fill="white" font-size="10">Recording</text>
                                 
                                 <!-- Arrow -->
-                                <path d="M85 50 L105 50 M100 47 L105 50 L100 53" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                <path d="M130 75 L160 75 M152 68 L160 75 L152 82" stroke="#4ecdc4" stroke-width="3" fill="none"/>
                                 
                                 <!-- Transcribe -->
-                                <rect x="110" y="25" width="70" height="50" rx="8" fill="#f093fb" opacity="0.9"/>
-                                <text x="145" y="45" text-anchor="middle" fill="white" font-size="14">🧠</text>
-                                <text x="145" y="55" text-anchor="middle" fill="white" font-size="6" font-weight="bold">Whisper</text>
-                                <text x="145" y="65" text-anchor="middle" fill="white" font-size="8" font-weight="bold">Transcribe</text>
+                                <rect x="170" y="40" width="100" height="70" rx="12" fill="#f093fb" opacity="0.9"/>
+                                <text x="220" y="70" text-anchor="middle" fill="white" font-size="20">🧠</text>
+                                <text x="220" y="85" text-anchor="middle" fill="white" font-size="9" font-weight="bold">OpenAI Whisper</text>
+                                <text x="220" y="98" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Transcribe</text>
                                 
                                 <!-- Arrow -->
-                                <path d="M185 50 L205 50 M200 47 L205 50 L200 53" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                <path d="M280 75 L310 75 M302 68 L310 75 L302 82" stroke="#4ecdc4" stroke-width="3" fill="none"/>
                                 
                                 <!-- Clean-Up -->
-                                <rect x="210" y="25" width="70" height="50" rx="8" fill="#667eea" opacity="0.9"/>
-                                <text x="245" y="45" text-anchor="middle" fill="white" font-size="14">👤</text>
-                                <text x="245" y="55" text-anchor="middle" fill="white" font-size="6" font-weight="bold">LLAMA 3.2</text>
-                                <text x="245" y="65" text-anchor="middle" fill="white" font-size="8" font-weight="bold">Clean-Up</text>
+                                <rect x="320" y="40" width="100" height="70" rx="12" fill="#667eea" opacity="0.9"/>
+                                <text x="370" y="70" text-anchor="middle" fill="white" font-size="20">👤</text>
+                                <text x="370" y="85" text-anchor="middle" fill="white" font-size="9" font-weight="bold">LLAMA 3.2</text>
+                                <text x="370" y="98" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Clean-Up</text>
                                 
                                 <!-- Arrow -->
-                                <path d="M285 50 L305 50 M300 47 L305 50 L300 53" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                <path d="M430 75 L460 75 M452 68 L460 75 L452 82" stroke="#4ecdc4" stroke-width="3" fill="none"/>
                                 
                                 <!-- Minutes Generator -->
-                                <rect x="310" y="25" width="70" height="50" rx="8" fill="#667eea" opacity="0.9"/>
-                                <text x="345" y="45" text-anchor="middle" fill="white" font-size="14">👤</text>
-                                <text x="345" y="55" text-anchor="middle" fill="white" font-size="6" font-weight="bold">Granite 3.0</text>
-                                <text x="345" y="65" text-anchor="middle" fill="white" font-size="8" font-weight="bold">Minutes</text>
+                                <rect x="470" y="40" width="100" height="70" rx="12" fill="#667eea" opacity="0.9"/>
+                                <text x="520" y="70" text-anchor="middle" fill="white" font-size="20">👤</text>
+                                <text x="520" y="85" text-anchor="middle" fill="white" font-size="9" font-weight="bold">Granite 3.0</text>
+                                <text x="520" y="98" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Minutes</text>
                                 
                                 <!-- Arrow -->
-                                <path d="M385 50 L405 50 M400 47 L405 50 L400 53" stroke="#4ecdc4" stroke-width="2" fill="none"/>
+                                <path d="M580 75 L610 75 M602 68 L610 75 L602 82" stroke="#4ecdc4" stroke-width="3" fill="none"/>
                                 
                                 <!-- Gradio Interface -->
-                                <rect x="410" y="25" width="70" height="50" rx="8" fill="#667eea" opacity="0.9"/>
-                                <text x="445" y="45" text-anchor="middle" fill="white" font-size="16">💻</text>
-                                <text x="445" y="58" text-anchor="middle" fill="white" font-size="8" font-weight="bold">Gradio</text>
-                                <text x="445" y="68" text-anchor="middle" fill="white" font-size="7">Interface</text>
+                                <rect x="620" y="40" width="100" height="70" rx="12" fill="#667eea" opacity="0.9"/>
+                                <text x="670" y="70" text-anchor="middle" fill="white" font-size="24">💻</text>
+                                <text x="670" y="88" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Gradio</text>
+                                <text x="670" y="102" text-anchor="middle" fill="white" font-size="10">Interface</text>
                                 
                                 <!-- Supporting Tools Box -->
-                                <rect x="180" y="85" width="140" height="25" rx="6" fill="#4a4a4a" opacity="0.7" stroke="#4ecdc4" stroke-width="1"/>
-                                <text x="250" y="97" text-anchor="middle" fill="#4ecdc4" font-size="8" font-weight="bold">🛠️ Supporting Tech</text>
+                                <rect x="270" y="130" width="200" height="35" rx="8" fill="#4a4a4a" opacity="0.8" stroke="#4ecdc4" stroke-width="2"/>
+                                <text x="370" y="148" text-anchor="middle" fill="#4ecdc4" font-size="12" font-weight="bold">🛠️ Supporting Technologies</text>
                                 
                                 <!-- Prompt Template -->
-                                <text x="200" y="107" fill="white" font-size="10">📄</text>
-                                <text x="210" y="107" fill="#cccccc" font-size="7">Prompt</text>
+                                <rect x="290" y="155" width="80" height="18" rx="4" fill="#5a5a5a" opacity="0.7"/>
+                                <text x="310" y="162" fill="white" font-size="12">📄</text>
+                                <text x="325" y="166" fill="#cccccc" font-size="9" font-weight="bold">Prompt Template</text>
                                 
                                 <!-- LangChain -->
-                                <text x="270" y="107" fill="white" font-size="10">🔗</text>
-                                <text x="280" y="107" fill="#cccccc" font-size="7">LangChain</text>
+                                <rect x="380" y="155" width="80" height="18" rx="4" fill="#5a5a5a" opacity="0.7"/>
+                                <text x="400" y="162" fill="white" font-size="12">🔗</text>
+                                <text x="415" y="166" fill="#cccccc" font-size="9" font-weight="bold">LangChain</text>
                                 
                                 <!-- Curved arrows to supporting tools -->
-                                <path d="M245 75 Q250 80 250 85" stroke="#4ecdc4" stroke-width="1.5" fill="none" opacity="0.6"/>
-                                <path d="M250 85 Q250 80 345 75" stroke="#4ecdc4" stroke-width="1.5" fill="none" opacity="0.6"/>
+                                <path d="M370 110 Q370 120 340 130" stroke="#4ecdc4" stroke-width="2.5" fill="none" opacity="0.7"/>
+                                <path d="M410 130 Q520 120 520 110" stroke="#4ecdc4" stroke-width="2.5" fill="none" opacity="0.7"/>
                             </svg>
                         </div>
                         """)
