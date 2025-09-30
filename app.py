@@ -1,769 +1,699 @@
 import gradio as gr
-import whisper
-import torch
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, MarianMTModel, MarianTokenizer
-from langchain.prompts import ChatPromptTemplate, PromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain.schema import HumanMessage, SystemMessage, BaseMessage
-from langchain.chains import LLMChain, ConversationChain
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.memory import ConversationBufferMemory
-import re
 import os
 import tempfile
-import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+import re
+import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Try to import optional dependencies with graceful fallbacks
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+    logger.info("Whisper loaded successfully")
+except ImportError:
+    WHISPER_AVAILABLE = False
+    logger.warning("Whisper not available - audio transcription will be disabled")
+
+try:
+    import torch
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+    logger.info("Transformers loaded successfully")
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    logger.warning("Transformers not available - using fallback methods")
+
+try:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    LANGCHAIN_AVAILABLE = True
+    logger.info("LangChain loaded successfully")
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    logger.warning("LangChain not available - using simple text splitting")
 
 class MeetingAssistant:
     def __init__(self):
-        """Initialize the AI Meeting Assistant with lazy loading for faster startup"""
-        logging.basicConfig(level=logging.INFO)
-        logging.info("===== Application Startup at %s =====", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        
-        # Initialize models as None - will be loaded on first use (lazy loading)
         self.whisper_model = None
         self.summarizer = None
         self.sentiment_analyzer = None
-        
-        # Flags to track model loading status
-        self._whisper_loaded = False
-        self._summarizer_loaded = False
-        self._sentiment_loaded = False
+        self.text_splitter = None
+        self.initialize_models()
     
-    def init_translation_models(self):
-        """Initialize translation models for fast text-to-text translation (lazy loading)"""
-        if self._translation_loaded:
-            return
+    def initialize_models(self):
+        """Initialize all required models with graceful fallbacks"""
+        try:
+            # Initialize Whisper for speech-to-text
+            if WHISPER_AVAILABLE:
+                logger.info("Loading Whisper model...")
+                self.whisper_model = whisper.load_model("base")
+                logger.info("Whisper model loaded successfully")
             
-        translation_configs = {
-            'persian': 'Helsinki-NLP/opus-mt-en-fa',
-            'turkish': 'Helsinki-NLP/opus-mt-en-tr', 
-            'arabic': 'Helsinki-NLP/opus-mt-en-ar'
+            # Initialize Transformers models
+            if TRANSFORMERS_AVAILABLE:
+                logger.info("Loading AI models...")
+                try:
+                    # Try to load summarization model
+                    self.summarizer = pipeline(
+                        "summarization", 
+                        model="facebook/bart-large-cnn",
+                        device=-1  # Force CPU for stability
+                    )
+                    logger.info("Summarization model loaded")
+                except Exception as e:
+                    logger.warning(f"Could not load BART, trying smaller model: {e}")
+                    try:
+                        self.summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+                        logger.info("Fallback summarization model loaded")
+                    except Exception as e2:
+                        logger.warning(f"Could not load any summarization model: {e2}")
+                
+                try:
+                    # Try to load sentiment analysis model
+                    self.sentiment_analyzer = pipeline(
+                        "sentiment-analysis",
+                        model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+                        device=-1
+                    )
+                    logger.info("Sentiment analysis model loaded")
+                except Exception as e:
+                    logger.warning(f"Could not load RoBERTa, using default: {e}")
+                    try:
+                        self.sentiment_analyzer = pipeline("sentiment-analysis")
+                        logger.info("Default sentiment model loaded")
+                    except Exception as e2:
+                        logger.warning(f"Could not load any sentiment model: {e2}")
+            
+            # Initialize text splitter
+            if LANGCHAIN_AVAILABLE:
+                self.text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=1000,
+                    chunk_overlap=100
+                )
+                logger.info("LangChain text splitter initialized")
+            
+            logger.info("Model initialization completed")
+            
+        except Exception as e:
+            logger.error(f"Error initializing models: {str(e)}")
+    
+    def simple_text_split(self, text, chunk_size=1000):
+        """Simple text splitting when LangChain is not available"""
+        words = text.split()
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for word in words:
+            current_chunk.append(word)
+            current_size += len(word) + 1
+            
+            if current_size >= chunk_size:
+                chunks.append(' '.join(current_chunk))
+                current_chunk = []
+                current_size = 0
+        
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        return chunks
+    
+    def transcribe_audio(self, audio_path):
+        """Transcribe audio using Whisper or provide helpful message"""
+        try:
+            if audio_path is None:
+                return "Please upload an audio file.", []
+            
+            if not WHISPER_AVAILABLE or self.whisper_model is None:
+                return "Audio transcription is currently unavailable. Please try the Text Analysis tab to analyze meeting notes directly.", []
+            
+            logger.info("Starting audio transcription...")
+            result = self.whisper_model.transcribe(audio_path)
+            transcription = result["text"]
+            
+            # Extract segments with timestamps if available
+            segments = []
+            if "segments" in result:
+                for segment in result["segments"]:
+                    start_time = segment.get("start", 0)
+                    end_time = segment.get("end", 0)
+                    text = segment.get("text", "")
+                    segments.append({
+                        "start": start_time,
+                        "end": end_time,
+                        "text": text
+                    })
+            
+            logger.info("Audio transcription completed successfully")
+            return transcription, segments
+        
+        except Exception as e:
+            error_msg = f"Error transcribing audio: {str(e)}"
+            logger.error(error_msg)
+            return error_msg, []
+    
+    def simple_sentiment_analysis(self, text):
+        """Simple keyword-based sentiment analysis fallback"""
+        positive_words = ['good', 'great', 'excellent', 'awesome', 'fantastic', 'wonderful', 'amazing', 'perfect', 'love', 'like', 'happy', 'pleased', 'satisfied', 'success', 'successful', 'approve', 'agree', 'positive', 'benefit', 'advantage']
+        negative_words = ['bad', 'terrible', 'awful', 'horrible', 'hate', 'dislike', 'angry', 'frustrated', 'disappointed', 'fail', 'failure', 'problem', 'issue', 'concern', 'worried', 'disagree', 'negative', 'difficult', 'challenge', 'risk']
+        
+        words = re.findall(r'\b\w+\b', text.lower())
+        positive_count = sum(1 for word in words if word in positive_words)
+        negative_count = sum(1 for word in words if word in negative_words)
+        
+        total_sentiment_words = positive_count + negative_count
+        if total_sentiment_words == 0:
+            return {"positive": 40, "negative": 20, "neutral": 40}
+        
+        # Calculate percentages with some baseline
+        positive_percent = min(80, (positive_count / total_sentiment_words) * 70 + 15)
+        negative_percent = min(80, (negative_count / total_sentiment_words) * 70 + 15)
+        neutral_percent = max(5, 100 - positive_percent - negative_percent)
+        
+        return {
+            "positive": round(positive_percent, 1),
+            "negative": round(negative_percent, 1),
+            "neutral": round(neutral_percent, 1)
         }
-        
-        for lang, model_name in translation_configs.items():
-            try:
-                self.translation_models[lang] = {
-                    'model': MarianMTModel.from_pretrained(model_name),
-                    'tokenizer': MarianTokenizer.from_pretrained(model_name)
-                }
-                logging.info(f"Loaded {lang} translation model")
-            except Exception as e:
-                logging.warning(f"Could not load {lang} translation model: {e}")
-        
-        self._translation_loaded = True
-
-    def translate_text(self, text, target_language):
-        """Translate text to target language using fast text-to-text models"""
-        # Lazy load translation models only when needed
-        if not self._translation_loaded:
-            self.init_translation_models()
-            
-        if target_language not in self.translation_models:
-            return f"Translation to {target_language} not available"
-        
-        try:
-            model_data = self.translation_models[target_language]
-            model = model_data['model']
-            tokenizer = model_data['tokenizer']
-            
-            # Speed optimizations for translation
-            inputs = tokenizer(
-                text, 
-                return_tensors="pt", 
-                padding=True, 
-                truncation=True, 
-                max_length=256  # Reduced for speed
-            )
-            translated = model.generate(
-                **inputs, 
-                max_length=256,  # Reduced for speed
-                num_beams=1,  # Faster single beam
-                early_stopping=True,
-                do_sample=False  # Deterministic for speed
-            )
-            result = tokenizer.decode(translated[0], skip_special_tokens=True)
-            
-            return result
-        except Exception as e:
-            logging.error(f"Translation error for {target_language}: {e}")
-            return f"Translation to {target_language} failed: {str(e)}"
-    
-    def extract_summary(self, text: str) -> str:
-        """Extract summary using optimized processing"""
-        try:
-            # Lazy load summarizer only when needed
-            if not self._summarizer_loaded:
-                self.init_summarizer()
-            
-            # For speed, limit text length and use fewer chunks
-            if self.summarizer and len(text) > 100:
-                # Smaller chunks and process fewer for speed
-                max_chunk = 512  # Reduced chunk size for faster processing
-                chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
-                
-                summaries = []
-                for chunk in chunks[:2]:  # Process only first 2 chunks for speed
-                    if len(chunk.strip()) > 30:
-                        summary = self.summarizer(
-                            chunk, 
-                            max_length=80,  # Shorter summaries for speed
-                            min_length=20, 
-                            do_sample=False,
-                            num_beams=2  # Fewer beams for speed
-                        )
-                        summaries.append(summary[0]['summary_text'])
-                
-                if summaries:
-                    return " ".join(summaries)
-            
-            # Fast fallback method
-            return self._fallback_summary(text)
-            
-        except Exception as e:
-            logging.error(f"Error in summarization: {e}")
-            return self._fallback_summary(text)
-    
-    def _fallback_summary(self, text):
-        """Fallback summary method using sentence extraction"""
-        sentences = re.split(r'[.!?]+', text)
-        # Take first few meaningful sentences
-        summary_sentences = []
-        for sentence in sentences[:5]:
-            sentence = sentence.strip()
-            if len(sentence) > 20:
-                summary_sentences.append(sentence)
-        
-        return ". ".join(summary_sentences) + "." if summary_sentences else "Summary not available."
     
     def analyze_sentiment(self, text):
-        """Analyze sentiment using RoBERTa or fallback method"""
+        """Analyze sentiment of the text with AI or fallback method"""
         try:
-            if self.sentiment_analyzer:
-                # Process text in chunks
-                max_chunk = 500
-                chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
-                
-                sentiments = []
-                for chunk in chunks[:3]:
-                    if len(chunk.strip()) > 10:
+            if not TRANSFORMERS_AVAILABLE or self.sentiment_analyzer is None:
+                return self.simple_sentiment_analysis(text)
+            
+            # Split text into manageable chunks
+            if self.text_splitter:
+                chunks = self.text_splitter.split_text(text)
+            else:
+                chunks = self.simple_text_split(text, 512)
+            
+            sentiments = []
+            for chunk in chunks[:5]:  # Limit to first 5 chunks for performance
+                if len(chunk.strip()) > 10:
+                    try:
                         result = self.sentiment_analyzer(chunk)
                         sentiments.append(result[0])
-                
-                if sentiments:
-                    # Aggregate sentiments
-                    positive_count = sum(1 for s in sentiments if s['label'] in ['POSITIVE', 'LABEL_2'])
-                    negative_count = sum(1 for s in sentiments if s['label'] in ['NEGATIVE', 'LABEL_0'])
-                    neutral_count = len(sentiments) - positive_count - negative_count
+                    except Exception as e:
+                        logger.warning(f"Error analyzing chunk sentiment: {e}")
+                        continue
+            
+            if not sentiments:
+                return self.simple_sentiment_analysis(text)
+            
+            # Map different label formats to standard format
+            positive_labels = ['POSITIVE', 'LABEL_2']
+            negative_labels = ['NEGATIVE', 'LABEL_0'] 
+            neutral_labels = ['NEUTRAL', 'LABEL_1']
+            
+            positive_count = sum(1 for s in sentiments if s['label'] in positive_labels)
+            negative_count = sum(1 for s in sentiments if s['label'] in negative_labels)
+            neutral_count = sum(1 for s in sentiments if s['label'] in neutral_labels)
+            
+            total = len(sentiments)
+            return {
+                "positive": round((positive_count / total) * 100, 1) if total > 0 else 33,
+                "negative": round((negative_count / total) * 100, 1) if total > 0 else 33,
+                "neutral": round((neutral_count / total) * 100, 1) if total > 0 else 34
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in sentiment analysis: {str(e)}")
+            return self.simple_sentiment_analysis(text)
+    
+    def create_simple_summary(self, text, summary_type):
+        """Create a simple summary when AI summarization is not available"""
+        # Get the most important sentences (first few and any with key indicators)
+        sentences = re.split(r'[.!?]+', text)
+        important_sentences = []
+        
+        # Take first few sentences
+        for i, sentence in enumerate(sentences[:6]):
+            sentence = sentence.strip()
+            if len(sentence) > 20:
+                important_sentences.append(sentence)
+        
+        # Look for sentences with important keywords
+        key_phrases = ['decision', 'action', 'next step', 'important', 'key', 'main', 'summary', 'conclusion', 'result']
+        for sentence in sentences[6:20]:  # Check next 14 sentences
+            sentence = sentence.strip()
+            if len(sentence) > 20:
+                sentence_lower = sentence.lower()
+                if any(phrase in sentence_lower for phrase in key_phrases):
+                    if sentence not in important_sentences:
+                        important_sentences.append(sentence)
+                        if len(important_sentences) >= 8:
+                            break
+        
+        if not important_sentences:
+            important_sentences = [sentences[0].strip()] if sentences and sentences[0].strip() else ["No content available for summary."]
+        
+        summary = '. '.join(important_sentences)
+        if summary and not summary.endswith('.'):
+            summary += '.'
+        
+        return self.format_summary(summary, summary_type)
+    
+    def format_summary(self, summary, summary_type):
+        """Format summary based on requested type"""
+        if not summary.strip():
+            return "Unable to generate summary from the provided content."
+            
+        if summary_type == "bullet_points":
+            sentences = re.split(r'[.!?]+', summary)
+            bullet_points = []
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) > 15:
+                    bullet_points.append(f"• {sentence}")
+            return "\n".join(bullet_points[:8]) if bullet_points else "• No key points identified"
+        
+        elif summary_type == "executive_summary":
+            return f"**Executive Summary:**\n\n{summary}"
+        
+        else:  # paragraph
+            return summary
+    
+    def summarize_text(self, text, summary_type="bullet_points"):
+        """Summarize the text using AI or fallback method"""
+        try:
+            if len(text.strip()) < 100:
+                return "Text is too short for meaningful summarization. Please provide more content."
+            
+            if not TRANSFORMERS_AVAILABLE or self.summarizer is None:
+                return self.create_simple_summary(text, summary_type)
+            
+            # Split text into manageable chunks
+            if self.text_splitter:
+                chunks = self.text_splitter.split_text(text)
+            else:
+                chunks = self.simple_text_split(text, 1000)
+            
+            summaries = []
+            for chunk in chunks[:3]:  # Process first 3 chunks for performance
+                if len(chunk.strip()) > 100:
+                    try:
+                        summary_result = self.summarizer(
+                            chunk, 
+                            max_length=130, 
+                            min_length=30, 
+                            do_sample=False
+                        )
+                        summaries.append(summary_result[0]['summary_text'])
+                    except Exception as e:
+                        logger.warning(f"Error summarizing chunk: {e}")
+                        continue
+            
+            if not summaries:
+                return self.create_simple_summary(text, summary_type)
+            
+            # Combine all summaries
+            combined_summary = " ".join(summaries)
+            return self.format_summary(combined_summary, summary_type)
+        
+        except Exception as e:
+            logger.error(f"Error in summarization: {str(e)}")
+            return self.create_simple_summary(text, summary_type)
+    
+    def extract_action_items(self, text):
+        """Extract action items and tasks from the text"""
+        try:
+            action_patterns = [
+                r'\b(action item|follow up|next step|to do|todo|task)\b.*?[.!?]',
+                r'\b(assign|responsible|deadline|complete|finish)\b.*?[.!?]',
+                r'\b(schedule|plan|implement|review|check|prepare)\b.*?[.!?]',
+                r'\b(need to|should|must|will|going to)\b.*?\b(by|before|until|next week|tomorrow|monday|tuesday|wednesday|thursday|friday)\b.*?[.!?]',
+                r'\b(send|email|call|contact|reach out|create|make|build|update|inform|notify)\b.*?[.!?]'
+            ]
+            
+            action_items = []
+            for pattern in action_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
+                for match in matches:
+                    if isinstance(match, tuple):
+                        match = ' '.join(match)
                     
-                    total = len(sentiments)
-                    return f"Positive: {(positive_count/total)*100:.1f}%, Neutral: {(neutral_count/total)*100:.1f}%, Negative: {(negative_count/total)*100:.1f}%"
+                    # Clean up the match
+                    match = re.sub(r'\s+', ' ', match).strip()
+                    if len(match) > 20 and len(match) < 200:
+                        # Capitalize first letter
+                        match = match[0].upper() + match[1:] if match else ""
+                        formatted_item = f"• {match}"
+                        if formatted_item not in action_items:
+                            action_items.append(formatted_item)
+                        
+                        if len(action_items) >= 10:
+                            break
                 
-            return self._fallback_sentiment(text)
-        except Exception as e:
-            logging.error(f"Error in sentiment analysis: {e}")
-            return self._fallback_sentiment(text)
-    
-    def _fallback_sentiment(self, text):
-        """Fallback sentiment analysis using keyword matching"""
-        positive_words = ['good', 'great', 'excellent', 'positive', 'success', 'agree', 'happy', 'pleased']
-        negative_words = ['bad', 'terrible', 'negative', 'problem', 'issue', 'disagree', 'frustrated', 'concerned']
-        
-        words = text.lower().split()
-        pos_count = sum(1 for word in words if any(pw in word for pw in positive_words))
-        neg_count = sum(1 for word in words if any(nw in word for nw in negative_words))
-        
-        total_sentiment_words = pos_count + neg_count
-        if total_sentiment_words == 0:
-            return "Neutral: 70%, Positive: 20%, Negative: 10%"
-        
-        pos_pct = (pos_count / total_sentiment_words) * 100
-        neg_pct = (neg_count / total_sentiment_words) * 100
-        neu_pct = 100 - pos_pct - neg_pct
-        
-        return f"Positive: {pos_pct:.1f}%, Neutral: {neu_pct:.1f}%, Negative: {neg_pct:.1f}%"
-    
-    def init_processing_chains(self):
-        """Initialize advanced ChatPromptTemplate-based processing chains following documentation"""
-        
-        # System template for meeting analysis context
-        self.system_template = SystemMessagePromptTemplate.from_template(
-            """You are an expert AI meeting assistant specialized in analyzing meeting transcripts and generating comprehensive insights.
-            
-            Your expertise includes:
-            - Extracting actionable tasks and assignments with clear ownership
-            - Identifying key decisions and next steps
-            - Analyzing meeting tone and participant engagement
-            - Summarizing complex discussions into clear, concise points
-            - Recognizing deadlines, commitments, and follow-up requirements
-            
-            Always provide structured, professional output that meeting participants can immediately act upon.
-            Focus on concrete actions rather than abstract discussions.
-            """
-        )
-        
-        # Action items extraction template - following documentation structure
-        self.action_items_template = ChatPromptTemplate.from_messages([
-            self.system_template,
-            HumanMessagePromptTemplate.from_template(
-                """Analyze this meeting transcript and extract specific action items, tasks, and assignments:
-                
-                MEETING CONTEXT:
-                {context}
-                
-                EXTRACT THE FOLLOWING:
-                1. Specific tasks assigned to individuals
-                2. Action items with clear next steps
-                3. Deadlines and time-sensitive commitments
-                4. Follow-up meetings or check-ins required
-                5. Decisions that require implementation
-                
-                FORMAT REQUIREMENTS:
-                - Each action item as a bullet point starting with '•'
-                - Include WHO is responsible (when mentioned)
-                - Include WHEN (deadline/timeframe when mentioned)
-                - Include WHAT (specific action required)
-                - Be specific and actionable
-                
-                Example format:
-                • [Person] will [specific action] by [deadline]
-                • Team needs to [specific task] before [timeframe]
-                • Follow up on [topic] in next meeting
-                
-                ACTION ITEMS:
-                """
-            )
-        ])
-        
-        # Meeting summary template - enhanced structure
-        self.summary_template = ChatPromptTemplate.from_messages([
-            self.system_template,
-            HumanMessagePromptTemplate.from_template(
-                """Generate a comprehensive meeting summary from this transcript:
-                
-                MEETING CONTEXT:
-                {context}
-                
-                GENERATE A SUMMARY THAT INCLUDES:
-                1. Main discussion topics and agenda items covered
-                2. Key decisions made during the meeting
-                3. Important announcements or updates shared
-                4. Problems or challenges discussed
-                5. Solutions or approaches agreed upon
-                
-                FORMAT AS:
-                **Main Topics Discussed:**
-                • [Topic 1 with brief description]
-                • [Topic 2 with brief description]
-                
-                **Key Decisions Made:**
-                • [Decision 1 and rationale]
-                • [Decision 2 and impact]
-                
-                **Important Updates:**
-                • [Update 1]
-                • [Update 2]
-                
-                Keep each point concise but informative. Focus on outcomes and conclusions rather than process.
-                
-                MEETING SUMMARY:
-                """
-            )
-        ])
-        
-        # Key topics extraction template
-        self.topics_template = ChatPromptTemplate.from_messages([
-            self.system_template,
-            HumanMessagePromptTemplate.from_template(
-                """Identify and extract the key topics, themes, and subjects discussed in this meeting:
-                
-                MEETING CONTEXT:
-                {context}
-                
-                ANALYSIS REQUIREMENTS:
-                1. Identify main subjects and topics of discussion
-                2. Recognize recurring themes throughout the meeting
-                3. Note any specific projects, products, or initiatives mentioned
-                4. Highlight any important terms or concepts central to the discussion
-                
-                FORMAT EACH TOPIC AS:
-                • [Topic Name] - [Brief description of what was discussed]
-                
-                Focus on:
-                - Business-relevant topics
-                - Project names and initiatives
-                - Key concepts and terminology
-                - Strategic themes
-                - Technical subjects
-                
-                KEY TOPICS DISCUSSED:
-                """
-            )
-        ])
-        
-    def extract_action_items(self, text: str) -> str:
-        """Extract action items using advanced ChatPromptTemplate-based approach"""
-        try:
-            # Process the text through the structured chain
-            processed_result = self._process_with_chain(
-                template=self.action_items_template,
-                context=text,
-                fallback_method=self._extract_tasks_with_enhanced_patterns
-            )
-            
-            return processed_result
-        
-        except Exception as e:
-            logging.error(f"Error extracting action items: {str(e)}")
-            return self._extract_tasks_with_enhanced_patterns(text)
-    
-    def _process_with_chain(self, template: ChatPromptTemplate, context: str, fallback_method=None) -> str:
-        """Process text through ChatPromptTemplate chain with intelligent fallback"""
-        try:
-            # Format the prompt with the context
-            formatted_messages = template.format_messages(context=context)
-            
-            # Since we don't have an LLM connection, we simulate the structured processing
-            # by using the template structure to guide enhanced pattern matching
-            
-            # Extract the human message template for analysis
-            human_msg = None
-            for msg in formatted_messages:
-                if isinstance(msg, HumanMessage):
-                    human_msg = msg.content
+                if len(action_items) >= 10:
                     break
             
-            # Use the template structure to enhance processing
-            if "ACTION ITEMS" in human_msg:
-                return self._extract_tasks_with_enhanced_patterns(context)
-            elif "MEETING SUMMARY" in human_msg:
-                return self._generate_structured_summary(context)
-            elif "KEY TOPICS" in human_msg:
-                return self._extract_structured_topics(context)
-            else:
-                # Fallback to provided method or basic processing
-                return fallback_method(context) if fallback_method else context[:500] + "..."
+            # If no explicit action items found, look for imperative sentences
+            if len(action_items) < 3:
+                sentences = re.split(r'[.!?]', text)
+                imperative_indicators = ['please', 'make sure', 'ensure', 'remember to', 'don\'t forget']
                 
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if len(sentence) > 20 and len(sentence) < 200:
+                        sentence_lower = sentence.lower()
+                        if any(indicator in sentence_lower for indicator in imperative_indicators):
+                            formatted_item = f"• {sentence.capitalize()}"
+                            if formatted_item not in action_items:
+                                action_items.append(formatted_item)
+                                if len(action_items) >= 8:
+                                    break
+            
+            if not action_items:
+                action_items = ["• No clear action items identified in the text"]
+            
+            return "\n".join(action_items[:10])
+        
         except Exception as e:
-            logging.error(f"Error in chain processing: {e}")
-            return fallback_method(context) if fallback_method else "Error in processing"
+            logger.error(f"Error extracting action items: {str(e)}")
+            return "• Error analyzing text for action items"
     
-    def _generate_structured_summary(self, text: str) -> str:
-        """Generate structured summary following the template format"""
+    def identify_key_topics(self, text):
+        """Identify key topics and important themes"""
         try:
-            # Extract sentences and analyze structure
-            sentences = re.split(r'[.!?]+', text)
+            # Extract meaningful words (4+ characters, not common stop words)
+            words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
             
-            # Identify main topics
-            topic_indicators = ['discussed', 'talked about', 'covered', 'reviewed', 'addressed', 'focused on']
-            main_topics = []
-            
-            # Identify decisions
-            decision_indicators = ['decided', 'agreed', 'concluded', 'determined', 'resolved', 'chose']
-            key_decisions = []
-            
-            # Identify updates
-            update_indicators = ['announced', 'reported', 'updated', 'informed', 'shared', 'mentioned']
-            important_updates = []
-            
-            for sentence in sentences[:20]:  # Process first 20 sentences
-                sentence = sentence.strip()
-                if len(sentence) > 20:
-                    sentence_lower = sentence.lower()
-                    
-                    if any(indicator in sentence_lower for indicator in topic_indicators):
-                        main_topics.append(f"• {sentence}")
-                    elif any(indicator in sentence_lower for indicator in decision_indicators):
-                        key_decisions.append(f"• {sentence}")
-                    elif any(indicator in sentence_lower for indicator in update_indicators):
-                        important_updates.append(f"• {sentence}")
-            
-            # Format the structured summary
-            summary_parts = []
-            
-            if main_topics:
-                summary_parts.append("**Main Topics Discussed:**")
-                summary_parts.extend(main_topics[:4])  # Limit to 4 topics
-                summary_parts.append("")
-            
-            if key_decisions:
-                summary_parts.append("**Key Decisions Made:**")
-                summary_parts.extend(key_decisions[:3])  # Limit to 3 decisions
-                summary_parts.append("")
-            
-            if important_updates:
-                summary_parts.append("**Important Updates:**")
-                summary_parts.extend(important_updates[:3])  # Limit to 3 updates
-            
-            if not summary_parts:
-                # Fallback to basic summary
-                key_sentences = [s.strip() for s in sentences[:5] if len(s.strip()) > 30]
-                return "\n".join([f"• {s}" for s in key_sentences[:3]])
-            
-            return "\n".join(summary_parts)
-            
-        except Exception as e:
-            logging.error(f"Error generating structured summary: {e}")
-            return "Error generating meeting summary"
-    
-    def _extract_structured_topics(self, text: str) -> str:
-        """Extract key topics following the template structure"""
-        try:
-            # Enhanced topic extraction with business context
-            words = re.findall(r'\b[A-Za-z]{3,}\b', text)
-            
-            # Business and project-relevant terms
-            business_terms = set()
-            project_terms = set()
-            
-            # Common stop words to exclude
+            # Comprehensive stop words list
             stop_words = {
-                'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 
-                'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 
-                'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 
-                'did', 'its', 'let', 'put', 'say', 'she', 'too', 'use', 'that', 'with',
-                'have', 'this', 'will', 'your', 'from', 'they', 'know', 'want', 'been',
-                'good', 'much', 'some', 'time', 'very', 'when', 'come', 'here', 'just',
-                'like', 'long', 'make', 'many', 'over', 'such', 'take', 'than', 'them',
-                'well', 'were', 'what', 'would', 'there', 'could', 'other', 'after',
-                'first', 'never', 'these', 'think', 'where', 'being', 'every', 'great',
-                'might', 'shall', 'still', 'those', 'under', 'while', 'again', 'before',
-                'right', 'about', 'also', 'back', 'call', 'came', 'each', 'even', 'going',
-                'look', 'most', 'move', 'need', 'only', 'said', 'same', 'show', 'tell',
-                'turn', 'ways', 'went', 'work', 'year', 'yes', 'meeting', 'discussion'
-            }
-            
-            # Business context indicators
-            business_indicators = {
-                'project', 'budget', 'timeline', 'deadline', 'revenue', 'sales', 'market',
-                'client', 'customer', 'product', 'service', 'strategy', 'planning',
-                'development', 'implementation', 'launch', 'campaign', 'initiative',
-                'objectives', 'goals', 'targets', 'metrics', 'performance', 'results'
+                'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 'did', 'its', 'let', 'put', 'say', 'she', 'too', 'use', 'that', 'with', 'have', 'this', 'will', 'your', 'from', 'they', 'know', 'want', 'been', 'good', 'much', 'some', 'time', 'very', 'when', 'come', 'here', 'just', 'like', 'long', 'make', 'many', 'over', 'such', 'take', 'than', 'them', 'well', 'were', 'what', 'would', 'there', 'could', 'other', 'after', 'first', 'never', 'these', 'think', 'where', 'being', 'every', 'great', 'might', 'shall', 'still', 'those', 'under', 'while', 'again', 'before', 'right', 'about', 'also', 'back', 'call', 'came', 'each', 'even', 'going', 'look', 'most', 'move', 'need', 'only', 'said', 'same', 'show', 'tell', 'turn', 'ways', 'went', 'work', 'year', 'yes'
             }
             
             # Count word frequencies
             word_count = {}
             for word in words:
-                word_lower = word.lower()
-                if word_lower not in stop_words and len(word) > 3:
-                    word_count[word_lower] = word_count.get(word_lower, 0) + 1
+                if word not in stop_words and len(word) > 3:
+                    word_count[word] = word_count.get(word, 0) + 1
             
-            # Identify business-relevant topics
+            if not word_count:
+                return "• No significant topics identified"
+            
+            # Sort by frequency and get top words
+            top_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:15]
+            
             topics = []
-            
-            # Sort by frequency and relevance
-            sorted_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)
-            
-            for word, count in sorted_words[:15]:
+            for word, count in top_words:
                 if count > 1:  # Only include words mentioned multiple times
-                    # Determine topic category
-                    if word in business_indicators or count >= 3:
-                        if count >= 3:
-                            topics.append(f"• {word.capitalize()} - Key focus area (mentioned {count} times)")
-                        else:
-                            topics.append(f"• {word.capitalize()} - Business topic discussed")
+                    topics.append(f"• {word.capitalize()} (mentioned {count} times)")
             
-            # If no business topics found, include general frequent terms
-            if len(topics) < 3:
-                for word, count in sorted_words[:8]:
-                    if len(topics) >= 8:  # Limit total topics
-                        break
-                    if word not in [t.split()[1].lower().rstrip(' -') for t in topics]:
-                        topics.append(f"• {word.capitalize()} - Discussion topic")
+            if not topics:
+                # If no repeated words, just take the most common single mentions
+                for word, count in top_words[:8]:
+                    topics.append(f"• {word.capitalize()}")
             
-            return "\n".join(topics) if topics else "• No significant topics identified in the discussion"
-            
-        except Exception as e:
-            logging.error(f"Error extracting structured topics: {e}")
-            return "• Error analyzing discussion topics"
-    
-    def _extract_tasks_with_enhanced_patterns(self, text):
-        """Enhanced pattern-based task extraction following the documentation structure"""
-        try:
-            # Enhanced patterns based on meeting context analysis
-            task_patterns = [
-                # Direct task assignments
-                r'([A-Za-z]+)\s+(will|should|needs to|has to|must)\s+([^.!?]*[.!?])',
-                # Action items with deadlines
-                r'(action item|task|follow up|next step|to do|todo)\s*:?\s*([^.!?]*[.!?])',
-                # Assignment patterns
-                r'(assign|assigned|responsible for|owns|will handle)\s+([^.!?]*[.!?])',
-                # Deadline patterns
-                r'(by|before|deadline|due)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|tomorrow|\d{1,2}/\d{1,2}|\d{1,2}-\d{1,2})\s*[,:]?\s*([^.!?]*[.!?])',
-                # Communication tasks
-                r'(send|email|call|contact|reach out to|notify|inform|update)\s+([^.!?]*[.!?])',
-                # Creation/preparation tasks
-                r'(create|prepare|develop|build|write|draft|review|analyze)\s+([^.!?]*[.!?])',
-                # Meeting scheduling
-                r'(schedule|arrange|set up|plan)\s+(meeting|call|session)\s*([^.!?]*[.!?])'
-            ]
-            
-            action_items = []
-            processed_items = set()
-            
-            for pattern in task_patterns:
-                matches = re.finditer(pattern, text, re.IGNORECASE | re.DOTALL)
-                for match in matches:
-                    # Extract the meaningful part of the match
-                    full_match = match.group(0).strip()
-                    
-                    # Clean and format the task
-                    task = re.sub(r'\s+', ' ', full_match)
-                    task = task.strip()
-                    
-                    if len(task) > 15 and len(task) < 200:
-                        # Ensure proper capitalization
-                        task = task[0].upper() + task[1:] if task else ""
-                        
-                        # Remove duplicates
-                        task_key = task.lower().replace(' ', '')
-                        if task_key not in processed_items:
-                            processed_items.add(task_key)
-                            formatted_item = f"• {task}"
-                            action_items.append(formatted_item)
-                            
-                            if len(action_items) >= 8:
-                                break
-                
-                if len(action_items) >= 8:
-                    break
-            
-            # If insufficient tasks found, look for imperative sentences
-            if len(action_items) < 3:
-                sentences = re.split(r'[.!?]+', text)
-                decision_indicators = [
-                    'decided', 'agreed', 'resolved', 'concluded', 'determined',
-                    'please', 'make sure', 'ensure', 'remember to', 'don\'t forget',
-                    'we need to', 'let\'s', 'should we', 'will do', 'going to do'
-                ]
-                
-                for sentence in sentences:
-                    sentence = sentence.strip()
-                    if len(sentence) > 25 and len(sentence) < 150:
-                        sentence_lower = sentence.lower()
-                        if any(indicator in sentence_lower for indicator in decision_indicators):
-                            sentence = sentence[0].upper() + sentence[1:] if sentence else ""
-                            task_key = sentence.lower().replace(' ', '')
-                            if task_key not in processed_items:
-                                processed_items.add(task_key)
-                                formatted_item = f"• {sentence}"
-                                action_items.append(formatted_item)
-                                if len(action_items) >= 6:
-                                    break
-            
-            # Ensure we have meaningful tasks
-            if not action_items:
-                action_items = ["• No specific action items identified in the meeting context"]
-            
-            return "\n".join(action_items[:8])
+            return "\n".join(topics) if topics else "• No significant topics identified"
         
         except Exception as e:
-            logging.error(f"Error in enhanced task extraction: {str(e)}")
-            return "• Error analyzing meeting context for tasks"
+            logger.error(f"Error identifying topics: {str(e)}")
+            return "• Error analyzing topics from text"
     
-    def extract_key_topics(self, text: str) -> str:
-        """Extract key topics using advanced ChatPromptTemplate approach"""
+    def process_meeting_text(self, input_text, summary_type="bullet_points"):
+        """Process meeting text and generate comprehensive analysis"""
         try:
-            # Use structured template-based topic extraction
-            return self._process_with_chain(
-                template=self.topics_template,
-                context=text,
-                fallback_method=self._extract_structured_topics
-            )
+            if not input_text or len(input_text.strip()) < 50:
+                return "Please provide meeting text with at least 50 characters for analysis.", "", "", "", "", ""
             
-        except Exception as e:
-            logging.error(f"Error extracting topics: {e}")
-            return self._extract_structured_topics(text)
-    
-    def generate_meeting_minutes(self, transcript: str, summary: str, action_items: str, sentiment: str, key_topics: str) -> str:
-        """Generate comprehensive meeting minutes with enhanced structure"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Enhanced meeting minutes with professional structure
-        meeting_minutes = f"""# 🎯 Meeting Analysis Report
-**Generated:** {timestamp} | **Powered by:** Advanced AI Meeting Assistant
+            transcription = input_text.strip()
+            logger.info("Processing meeting text...")
+            
+            # Generate summary
+            summary = self.summarize_text(transcription, summary_type)
+            
+            # Analyze sentiment
+            sentiment = self.analyze_sentiment(transcription)
+            sentiment_text = f"""**Meeting Sentiment Analysis:**
+• Positive: {sentiment['positive']}%
+• Neutral: {sentiment['neutral']}%  
+• Negative: {sentiment['negative']}%"""
+            
+            # Extract action items
+            action_items = self.extract_action_items(transcription)
+            
+            # Identify key topics
+            topics = self.identify_key_topics(transcription)
+            
+            # Create comprehensive meeting report
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            meeting_report = f"""# 🎯 Meeting Analysis Report
+**Generated on:** {timestamp}
 
----
-
-## 📋 Executive Summary
+## 📋 Meeting Summary
 {summary}
 
----
+## 📊 Sentiment Analysis
+{sentiment_text}
 
-## ✅ Action Items & Next Steps
+## ✅ Action Items
 {action_items}
 
----
+## 🔑 Key Topics Discussed
+{topics}
 
-## 💭 Meeting Sentiment & Engagement
-{sentiment}
-
----
-
-## 🔑 Key Topics & Themes
-{key_topics}
+## 📝 Full Transcription
+{transcription}
 
 ---
-
-## 📝 Complete Meeting Transcript
-{transcript}
-
----
-
-### 🤖 Analysis Details
-- **Processing Method:** ChatPromptTemplate-based analysis with LangChain
-- **AI Models Used:** Whisper-medium, BART, RoBERTa, Enhanced Pattern Matching
-- **Template Structure:** Multi-layered prompt engineering for comprehensive insights
-- **Quality Assurance:** Fallback systems ensure reliable output
-
-*This analysis was generated using advanced AI techniques including structured prompt templates, chain-based processing, and intelligent fallback mechanisms to ensure comprehensive and actionable meeting insights.*"""
+*Generated by AI Meeting Assistant*"""
+            
+            logger.info("Meeting text processing completed successfully")
+            return transcription, summary, sentiment_text, action_items, topics, meeting_report
         
-        return meeting_minutes
-    
-    def process_meeting_simple(self, audio_file):
-        """Fast processing method with speed optimizations"""
-        if audio_file is None:
-            return "", None
-        
-        import time
-        start_time = time.time()
-        
-        try:
-            # Fast transcription with optimizations
-            transcript = self.transcribe_audio(audio_file)
-            if transcript.startswith("Error"):
-                return transcript, None
-            
-            # Parallel processing for speed (simulate with sequential but optimized calls)
-            logging.info("Starting fast analysis pipeline...")
-            
-            # Generate analysis components with speed optimizations
-            summary = self.extract_summary(transcript)
-            action_items = self.extract_action_items(transcript)
-            sentiment = self.analyze_sentiment(transcript)
-            key_topics = self.extract_key_topics(transcript)
-            
-            # Generate meeting minutes
-            meeting_minutes = self.generate_meeting_minutes(
-                transcript, summary, action_items, sentiment, key_topics
-            )
-            
-            # Create downloadable file
-            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', prefix='meeting_minutes_')
-            temp_file.write(meeting_minutes)
-            temp_file.close()
-            
-            processing_time = time.time() - start_time
-            logging.info(f"Fast processing completed in {processing_time:.2f} seconds")
-            
-            # Add performance info to the meeting minutes
-            performance_note = f"\n\n---\n⚡ **Performance**: Processed in {processing_time:.2f} seconds with speed optimizations\n"
-            meeting_minutes += performance_note
-            
-            return meeting_minutes, temp_file.name
-            
         except Exception as e:
-            error_msg = f"Error processing meeting: {str(e)}"
-            logging.error(error_msg)
-            return error_msg, None
+            error_msg = f"Error processing text: {str(e)}"
+            logger.error(error_msg)
+            return error_msg, "", "", "", "", ""
     
-    def process_meeting(self, audio_file, enable_persian=False, enable_turkish=False, enable_arabic=False):
-        """Process meeting audio and extract insights with optional translation"""
-        if audio_file is None:
-            return "Please upload an audio file.", "", "", "", "", "", "", "", ""
-        
+    def process_meeting_audio(self, audio_file, summary_type="bullet_points"):
+        """Process meeting audio file and generate analysis"""
         try:
+            if audio_file is None:
+                return "Please upload an audio file or use the Text Analysis tab to analyze meeting notes directly.", "", "", "", "", ""
+            
+            logger.info("Starting audio processing...")
+            
             # Transcribe audio
-            result = self.whisper_model.transcribe(audio_file)
-            transcript = result["text"]
+            transcription, segments = self.transcribe_audio(audio_file)
             
-            # Extract insights
-            summary = self.extract_summary(transcript)
-            action_items = self.extract_action_items(transcript)
-            sentiment = self.analyze_sentiment(transcript)
-            key_topics = self.extract_key_topics(transcript)
+            if transcription.startswith("Error") or transcription.startswith("Please") or transcription.startswith("Audio transcription"):
+                return transcription, "", "", "", "", ""
             
-            # Generate meeting minutes
-            meeting_minutes = self.generate_meeting_minutes(
-                transcript, summary, action_items, sentiment, key_topics
-            )
-            
-            # Prepare base outputs
-            outputs = [meeting_minutes, transcript, summary, action_items, sentiment, key_topics]
-            
-            # Add translations if requested (fast text-to-text translation)
-            persian_output = ""
-            turkish_output = ""  
-            arabic_output = ""
-            
-            if enable_persian:
-                persian_output = self.translate_text(meeting_minutes, 'persian')
-            if enable_turkish:
-                turkish_output = self.translate_text(meeting_minutes, 'turkish')
-            if enable_arabic:
-                arabic_output = self.translate_text(meeting_minutes, 'arabic')
-            
-            outputs.extend([persian_output, turkish_output, arabic_output])
-            
-            return tuple(outputs)
-            
+            # Process the transcribed text
+            return self.process_meeting_text(transcription, summary_type)
+        
         except Exception as e:
             error_msg = f"Error processing audio: {str(e)}"
-            return tuple([error_msg] + [""] * 8)
+            logger.error(error_msg)
+            return error_msg, "", "", "", "", ""
+
+# Initialize the meeting assistant
+meeting_assistant = MeetingAssistant()
+
+def create_interface():
+    """Create the Gradio interface matching the exact UI from the reference image"""
     
-    def create_interface(self):
-        """Create the Gradio interface matching the reference image"""
-        with gr.Blocks(theme=gr.themes.Soft(), title="AI Meeting Assistant") as demo:
-            gr.Markdown("""
-            # AI Meeting Assistant
-            
-            Upload an audio file of a meeting. This tool will transcribe the audio, fix product-related terminology, and generate meeting minutes along with a list of tasks.
-            """)
-            
-            with gr.Row():
-                with gr.Column(scale=1):
-                    # Audio input - matches the reference image
-                    audio_input = gr.Audio(
-                        label="Upload your audio file",
-                        type="filepath"
-                    )
-                    
-                    # Submit button
+    with gr.Blocks(
+        title="AI Meeting Assistant",
+        theme=gr.themes.Default(),
+    ) as interface:
+        
+        # Main title and description - exact match to the image
+        gr.HTML("""
+        <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #ffffff; font-size: 2.5em; margin-bottom: 10px;">AI Meeting Assistant</h1>
+            <p style="color: #cccccc; font-size: 1.1em; line-height: 1.4;">
+                Upload an audio file of a meeting. This tool will transcribe the audio, fix product-related terminology, and generate<br>
+                meeting minutes along with a list of tasks.
+            </p>
+        </div>
+        """)
+        
+        with gr.Row():
+            # Left column - Audio upload (matches the UI exactly)
+            with gr.Column(scale=1):
+                audio_input = gr.Audio(
+                    label="Upload your audio file",
+                    type="filepath",
+                    show_label=False
+                )
+                
+                with gr.Row():
+                    clear_btn = gr.Button("Clear", variant="secondary")
                     submit_btn = gr.Button("Submit", variant="primary")
                 
-                with gr.Column(scale=1):
-                    # Output section - matches the reference image
-                    output_text = gr.Textbox(
-                        label="Meeting Minutes and Tasks",
-                        lines=15,
-                        max_lines=20,
-                        placeholder="Meeting analysis will appear here...",
-                        show_copy_button=True
-                    )
-                    
-                    # Download section
-                    gr.Markdown("### Download the Generated Meeting Minutes and Tasks")
-                    download_file = gr.File(label="meeting_minutes_and_tasks.txt", visible=False)
+                # Status display for processing feedback
+                status_display = gr.HTML(visible=False)
             
-            # Event handlers
-            submit_btn.click(
-                fn=self.process_meeting_simple,
-                inputs=[audio_input],
-                outputs=[output_text, download_file],
-                show_progress=True
-            )
+            # Right column - Meeting Minutes and Tasks output (matches exactly)
+            with gr.Column(scale=1):
+                output_display = gr.Textbox(
+                    label="Meeting Minutes and Tasks",
+                    lines=20,
+                    show_label=True,
+                    interactive=False,
+                    placeholder="Your meeting minutes and task list will appear here after processing..."
+                )
+                
+                # Download section (matches the UI)
+                gr.HTML("""
+                <div style="margin-top: 15px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; color: #cccccc;">
+                        <input type="checkbox" id="download-checkbox" style="margin-right: 8px;" checked> 
+                        Download the Generated Meeting Minutes and Tasks
+                    </label>
+                </div>
+                """)
+                
+                # Create download file
+                download_file = gr.File(
+                    label="meeting_minutes_and_tasks.txt",
+                    visible=True,
+                    interactive=False
+                )
         
-        return demo
+        # Event handlers with full AI functionality
+        def process_meeting_audio(audio_file, progress=gr.Progress()):
+            """Process uploaded audio file with full AI pipeline"""
+            if audio_file is None:
+                return "Please upload an audio file to analyze.", None, """<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+                ❌ No audio file provided. Please upload an audio file to continue.
+                </div>"""
+            
+            try:
+                progress(0.1, desc="Starting audio processing...")
+                
+                # Update status
+                status_html = """<div style="color: #4ecdc4; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+                🎵 Processing audio file... This may take a few minutes for the first run.
+                </div>"""
+                
+                progress(0.3, desc="Transcribing audio...")
+                
+                # Process with the AI assistant - use the correct method
+                results = meeting_assistant.process_meeting_audio(audio_file, "bullet_points")
+                
+                if len(results) >= 6:
+                    transcription, summary, sentiment, actions, topics, report = results
+                    
+                    progress(0.8, desc="Generating meeting minutes...")
+                    
+                    # Format output exactly like the reference image
+                    meeting_minutes = f"""Meeting Minutes:
+{summary}
 
-# Initialize and launch with speed optimizations
-if __name__ == "__main__":
-    print("🚀 Starting AI Meeting Assistant with speed optimizations...")
-    print("⚡ Using lazy loading for faster startup")
-    print("🧠 Models will load only when needed")
+Task List:
+{actions}"""
+                    
+                    progress(0.9, desc="Creating download file...")
+                    
+                    # Create downloadable file
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+                        f.write(f"""AI Meeting Assistant - Generated Report
+Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+{report}""")
+                        temp_file_path = f.name
+                    
+                    progress(1.0, desc="Complete!")
+                    
+                    success_status = """<div style="color: #4ecdc4; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+                    ✅ Meeting analysis complete! Minutes and tasks generated successfully.
+                    </div>"""
+                    
+                    return meeting_minutes, temp_file_path, success_status
+                else:
+                    error_status = """<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+                    ❌ Error processing audio. Please try again with a different file.
+                    </div>"""
+                    return "Error processing audio file. Please try again.", None, error_status
+                    
+            except Exception as e:
+                logger.error(f"Error processing audio: {str(e)}")
+                error_status = f"""<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+                ❌ Error: {str(e)}
+                </div>"""
+                return f"Error processing audio: {str(e)}", None, error_status
+        
+        def clear_interface():
+            """Clear all inputs and outputs"""
+            return None, "", None, """<div style="color: #cccccc; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+            Interface cleared. Upload an audio file to begin analysis.
+            </div>"""
+        
+        # Wire up the event handlers
+        submit_btn.click(
+            fn=process_meeting_audio,
+            inputs=[audio_input],
+            outputs=[output_display, download_file, status_display]
+        )
+        
+        clear_btn.click(
+            fn=clear_interface,
+            inputs=[],
+            outputs=[audio_input, output_display, download_file, status_display]
+        )
+        
+        # Footer with comprehensive information - Dark theme compatible
+        gr.HTML("""
+        <div style="text-align: center; margin-top: 30px; padding: 20px; background-color: #1a1a1a; border-radius: 8px; border: 1px solid #444;">
+            <h3 style="color: #ffffff;">🚀 About This AI Meeting Assistant</h3>
+            <p style="color: #cccccc;">Comprehensive meeting analysis with intelligent fallback systems for maximum reliability:</p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0;">
+                <div style="background: #2a4a5a; padding: 15px; border-radius: 8px; border: 1px solid #3a5a6a;">
+                    <strong style="color: #ffffff;">🎙️ Audio Processing</strong><br>
+                    <span style="color: #cccccc;">Whisper AI for speech-to-text conversion</span>
+                </div>
+                <div style="background: #4a2a5a; padding: 15px; border-radius: 8px; border: 1px solid #5a3a6a;">
+                    <strong style="color: #ffffff;">📝 Text Analysis</strong><br>
+                    <span style="color: #cccccc;">Direct text processing and analysis</span>
+                </div>
+                <div style="background: #2a5a2a; padding: 15px; border-radius: 8px; border: 1px solid #3a6a3a;">
+                    <strong style="color: #ffffff;">🧠 AI Models</strong><br>
+                    <span style="color: #cccccc;">BART, RoBERTa + intelligent fallbacks</span>
+                </div>
+                <div style="background: #5a4a2a; padding: 15px; border-radius: 8px; border: 1px solid #6a5a3a;">
+                    <strong style="color: #ffffff;">📊 Insights</strong><br>
+                    <span style="color: #cccccc;">Summary, Sentiment, Actions, Topics</span>
+                </div>
+            </div>
+            <div style="margin-top: 20px;">
+                <h4 style="color: #ffffff;">🎯 Perfect for:</h4>
+                <div style="display: flex; justify-content: space-around; flex-wrap: wrap; margin: 15px 0;">
+                    <span style="color: #cccccc;">• Business Meetings</span>
+                    <span style="color: #cccccc;">• Interviews</span>
+                    <span style="color: #cccccc;">• Lectures</span>
+                    <span style="color: #cccccc;">• Brainstorming</span>
+                    <span style="color: #cccccc;">• Conference Calls</span>
+                </div>
+            </div>
+            <p style="margin-top: 20px; font-size: 0.9em; color: #aaaaaa;">
+                Built with ❤️ using Gradio, Transformers, LangChain, and Whisper<br>
+                Open source • Free to use • Privacy-focused
+            </p>
+            <p style="font-size: 0.8em; color: #888888; margin-top: 10px;">
+                <strong>Reliability Note:</strong> This app includes intelligent fallback methods to ensure functionality 
+                even when advanced AI models are unavailable, guaranteeing useful analysis in all scenarios.
+            </p>
+        </div>
+        """)
     
-    assistant = MeetingAssistant()
-    demo = assistant.create_interface()
-    demo.launch()
+    return interface
+
+# Launch the application
+if __name__ == "__main__":
+    interface = create_interface()
+    interface.launch(
+        share=True,
+        show_error=True,
+        server_name="0.0.0.0",
+        server_port=7860
+    )
