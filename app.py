@@ -537,11 +537,31 @@ Task List:
 def create_interface():
     """Create ultra-fast Gradio interface matching the reference image"""
     
-    # Force dark theme with custom JS to prevent white flash
+    # Force dark theme with custom JS to prevent white flash and theme detection
     dark_theme_js = """
     function() {
+        // Force dark theme immediately
         document.documentElement.setAttribute('data-theme', 'dark');
+        document.documentElement.classList.add('dark');
         document.body.style.backgroundColor = '#0b0f19';
+        document.body.classList.add('dark');
+        
+        // Override any theme detection
+        if (window.gradio_config) {
+            window.gradio_config.theme = 'dark';
+        }
+        
+        // Prevent system theme queries
+        if (window.matchMedia) {
+            const originalMatchMedia = window.matchMedia;
+            window.matchMedia = function(query) {
+                if (query.includes('prefers-color-scheme')) {
+                    return { matches: false, media: query, addListener: function() {}, removeListener: function() {} };
+                }
+                return originalMatchMedia(query);
+            };
+        }
+        
         return [];
     }
     """
@@ -685,5 +705,8 @@ if __name__ == "__main__":
     demo.launch(
         inbrowser=False,
         show_error=True,
-        quiet=False
+        quiet=False,
+        ssr_mode=False,  # Disable SSR to prevent theme detection
+        favicon_path=None,
+        app_kwargs={"docs_url": None, "redoc_url": None}
     )
