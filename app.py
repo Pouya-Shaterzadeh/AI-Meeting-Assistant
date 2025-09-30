@@ -511,7 +511,6 @@ class MeetingAssistant:
             
             total_time = time.time() - start_time
             
-            
             # Create download file
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', prefix='meeting_minutes_')
             temp_file.write(meeting_minutes)
@@ -540,11 +539,27 @@ def create_interface():
     
     with gr.Blocks(
         title="AI Meeting Assistant",
-        theme=gr.themes.Default(),
+        theme=gr.themes.Soft(primary_hue="blue").set(
+            body_background_fill="*neutral_950",
+            body_background_fill_dark="*neutral_950",
+            background_fill_primary="*neutral_900",
+            background_fill_primary_dark="*neutral_900",
+            background_fill_secondary="*neutral_800",
+            background_fill_secondary_dark="*neutral_800"
+        ),
     ) as interface:
         
-        # Main title and description - exact match to the image
+        # Force dark theme CSS to prevent white flash
         gr.HTML("""
+        <style>
+        body, html {
+            background-color: #0b0f19 !important;
+            color: #ffffff !important;
+        }
+        .gradio-container {
+            background-color: #0b0f19 !important;
+        }
+        </style>
         <div style="text-align: center; margin-bottom: 30px;">
             <h1 style="color: #ffffff; font-size: 2.5em; margin-bottom: 10px;">AI Meeting Assistant</h1>
             <p style="color: #cccccc; font-size: 1.1em; line-height: 1.4;">
