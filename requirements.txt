@@ -16,3 +16,6 @@ soundfile>=0.12.0
 ffmpeg-python>=0.2.0
 huggingface-hub>=0.17.0
 tokenizers>=0.15.0
+# Fast model dependencies
+sacremoses>=0.0.53
+optimum>=1.12.0
