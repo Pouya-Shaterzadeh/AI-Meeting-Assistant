@@ -642,44 +642,44 @@ Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             outputs=[audio_input, output_display, download_file, status_display]
         )
         
-        # Footer with comprehensive information
+        # Footer with comprehensive information - Dark theme compatible
         gr.HTML("""
-        <div style="text-align: center; margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
-            <h3>🚀 About This AI Meeting Assistant</h3>
-            <p>Comprehensive meeting analysis with intelligent fallback systems for maximum reliability:</p>
+        <div style="text-align: center; margin-top: 30px; padding: 20px; background-color: #1a1a1a; border-radius: 8px; border: 1px solid #444;">
+            <h3 style="color: #ffffff;">🚀 About This AI Meeting Assistant</h3>
+            <p style="color: #cccccc;">Comprehensive meeting analysis with intelligent fallback systems for maximum reliability:</p>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0;">
-                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px;">
-                    <strong>🎙️ Audio Processing</strong><br>
-                    Whisper AI for speech-to-text conversion
+                <div style="background: #2a4a5a; padding: 15px; border-radius: 8px; border: 1px solid #3a5a6a;">
+                    <strong style="color: #ffffff;">🎙️ Audio Processing</strong><br>
+                    <span style="color: #cccccc;">Whisper AI for speech-to-text conversion</span>
                 </div>
-                <div style="background: #f3e5f5; padding: 15px; border-radius: 8px;">
-                    <strong>📝 Text Analysis</strong><br>
-                    Direct text processing and analysis
+                <div style="background: #4a2a5a; padding: 15px; border-radius: 8px; border: 1px solid #5a3a6a;">
+                    <strong style="color: #ffffff;">📝 Text Analysis</strong><br>
+                    <span style="color: #cccccc;">Direct text processing and analysis</span>
                 </div>
-                <div style="background: #e8f5e8; padding: 15px; border-radius: 8px;">
-                    <strong>🧠 AI Models</strong><br>
-                    BART, RoBERTa + intelligent fallbacks
+                <div style="background: #2a5a2a; padding: 15px; border-radius: 8px; border: 1px solid #3a6a3a;">
+                    <strong style="color: #ffffff;">🧠 AI Models</strong><br>
+                    <span style="color: #cccccc;">BART, RoBERTa + intelligent fallbacks</span>
                 </div>
-                <div style="background: #fff3e0; padding: 15px; border-radius: 8px;">
-                    <strong>📊 Insights</strong><br>
-                    Summary, Sentiment, Actions, Topics
+                <div style="background: #5a4a2a; padding: 15px; border-radius: 8px; border: 1px solid #6a5a3a;">
+                    <strong style="color: #ffffff;">📊 Insights</strong><br>
+                    <span style="color: #cccccc;">Summary, Sentiment, Actions, Topics</span>
                 </div>
             </div>
             <div style="margin-top: 20px;">
-                <h4>🎯 Perfect for:</h4>
+                <h4 style="color: #ffffff;">🎯 Perfect for:</h4>
                 <div style="display: flex; justify-content: space-around; flex-wrap: wrap; margin: 15px 0;">
-                    <span>• Business Meetings</span>
-                    <span>• Interviews</span>
-                    <span>• Lectures</span>
-                    <span>• Brainstorming</span>
-                    <span>• Conference Calls</span>
+                    <span style="color: #cccccc;">• Business Meetings</span>
+                    <span style="color: #cccccc;">• Interviews</span>
+                    <span style="color: #cccccc;">• Lectures</span>
+                    <span style="color: #cccccc;">• Brainstorming</span>
+                    <span style="color: #cccccc;">• Conference Calls</span>
                 </div>
             </div>
-            <p style="margin-top: 20px; font-size: 0.9em; color: #666;">
+            <p style="margin-top: 20px; font-size: 0.9em; color: #aaaaaa;">
                 Built with ❤️ using Gradio, Transformers, LangChain, and Whisper<br>
                 Open source • Free to use • Privacy-focused
             </p>
-            <p style="font-size: 0.8em; color: #999; margin-top: 10px;">
+            <p style="font-size: 0.8em; color: #888888; margin-top: 10px;">
                 <strong>Reliability Note:</strong> This app includes intelligent fallback methods to ensure functionality 
                 even when advanced AI models are unavailable, guaranteeing useful analysis in all scenarios.
             </p>
