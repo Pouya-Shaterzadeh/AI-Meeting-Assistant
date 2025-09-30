@@ -537,6 +537,15 @@ Task List:
 def create_interface():
     """Create ultra-fast Gradio interface matching the reference image"""
     
+    # Force dark theme with custom JS to prevent white flash
+    dark_theme_js = """
+    function() {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.body.style.backgroundColor = '#0b0f19';
+        return [];
+    }
+    """
+    
     with gr.Blocks(
         title="AI Meeting Assistant",
         theme=gr.themes.Soft(primary_hue="blue").set(
@@ -547,6 +556,7 @@ def create_interface():
             background_fill_secondary="*neutral_800",
             background_fill_secondary_dark="*neutral_800"
         ),
+        js=dark_theme_js
     ) as interface:
         
         # Force dark theme CSS to prevent white flash
@@ -672,4 +682,8 @@ if __name__ == "__main__":
     print("🔗 ChatPromptTemplate chains ready for enhanced accuracy")
     
     demo = create_interface()
-    demo.launch()
+    demo.launch(
+        inbrowser=False,
+        show_error=True,
+        quiet=False
+    )
