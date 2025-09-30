@@ -530,6 +530,10 @@ def create_interface():
                 
                 # Status display for processing feedback
                 status_display = gr.HTML(visible=False)
+                
+                # Workflow information button
+                with gr.Row():
+                    workflow_btn = gr.Button("📋 View AI Workflow", variant="secondary", size="sm")
             
             # Right column - Meeting Minutes and Tasks output (matches exactly)
             with gr.Column(scale=1):
@@ -557,6 +561,7 @@ def create_interface():
                     visible=True,
                     interactive=False
                 )
+
         
         # Event handlers with full AI functionality
         def process_meeting_audio(audio_file, progress=gr.Progress()):
@@ -629,6 +634,122 @@ Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             Interface cleared. Upload an audio file to begin analysis.
             </div>"""
         
+        def show_workflow():
+            """Display the AI workflow information"""
+            workflow_html = """
+            <div style="background-color: #1a1a1a; padding: 25px; border-radius: 12px; border: 2px solid #4ecdc4; margin: 20px 0;">
+                <h2 style="color: #4ecdc4; text-align: center; margin-bottom: 20px;">🤖 AI Meeting Assistant Workflow</h2>
+                
+                <div style="display: flex; align-items: center; justify-content: center; margin: 30px 0;">
+                    <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 20px; justify-content: center;">
+                        
+                        <!-- Step 1: Meeting Recording -->
+                        <div style="text-align: center; min-width: 120px;">
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
+                                <div style="font-size: 2em;">🎤</div>
+                            </div>
+                            <div style="color: #ffffff; font-weight: bold; margin-bottom: 5px;">Meeting Recording</div>
+                            <div style="color: #cccccc; font-size: 0.8em;">Upload your audio file</div>
+                        </div>
+                        
+                        <!-- Arrow -->
+                        <div style="color: #4ecdc4; font-size: 1.5em; margin: 0 10px;">→</div>
+                        
+                        <!-- Step 2: Transcribe -->
+                        <div style="text-align: center; min-width: 120px;">
+                            <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
+                                <div style="font-size: 1.5em; color: white;">🧠</div>
+                                <div style="color: white; font-size: 0.7em; margin-top: 5px;">OpenAI Whisper</div>
+                            </div>
+                            <div style="color: #ffffff; font-weight: bold; margin-bottom: 5px;">Transcribe</div>
+                            <div style="color: #cccccc; font-size: 0.8em;">Speech-to-text conversion</div>
+                        </div>
+                        
+                        <!-- Arrow -->
+                        <div style="color: #4ecdc4; font-size: 1.5em; margin: 0 10px;">→</div>
+                        
+                        <!-- Step 3: Clean-Up Assistant -->
+                        <div style="text-align: center; min-width: 120px;">
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
+                                <div style="font-size: 1.5em; color: white;">👤</div>
+                                <div style="color: white; font-size: 0.7em; margin-top: 5px;">LLAMA 3.2</div>
+                            </div>
+                            <div style="color: #ffffff; font-weight: bold; margin-bottom: 5px;">Transcript Clean-Up</div>
+                            <div style="color: #cccccc; font-size: 0.8em;">Text refinement & processing</div>
+                        </div>
+                        
+                        <!-- Arrow -->
+                        <div style="color: #4ecdc4; font-size: 1.5em; margin: 0 10px;">→</div>
+                        
+                        <!-- Step 4: Meeting Minutes Generator -->
+                        <div style="text-align: center; min-width: 120px;">
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
+                                <div style="font-size: 1.5em; color: white;">👤</div>
+                                <div style="color: white; font-size: 0.7em; margin-top: 5px;">Granite 3.0</div>
+                            </div>
+                            <div style="color: #ffffff; font-weight: bold; margin-bottom: 5px;">Meeting Minutes & Tasks</div>
+                            <div style="color: #cccccc; font-size: 0.8em;">Generate structured output</div>
+                        </div>
+                        
+                        <!-- Arrow -->
+                        <div style="color: #4ecdc4; font-size: 1.5em; margin: 0 10px;">→</div>
+                        
+                        <!-- Step 5: Gradio Interface -->
+                        <div style="text-align: center; min-width: 120px;">
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
+                                <div style="font-size: 2em;">💻</div>
+                            </div>
+                            <div style="color: #ffffff; font-weight: bold; margin-bottom: 5px;">Gradio Interface</div>
+                            <div style="color: #cccccc; font-size: 0.8em;">User-friendly web app</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Supporting Tools -->
+                <div style="margin-top: 30px; padding: 20px; background-color: #2a2a2a; border-radius: 8px; border-left: 4px solid #4ecdc4;">
+                    <h3 style="color: #4ecdc4; margin-bottom: 15px;">🛠️ Supporting Technologies:</h3>
+                    <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 20px;">
+                        <div style="text-align: center;">
+                            <div style="background: #4a4a4a; padding: 10px; border-radius: 8px; margin-bottom: 5px;">
+                                <span style="color: #ffffff;">📄</span>
+                            </div>
+                            <div style="color: #cccccc; font-size: 0.9em;">Prompt Template</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="background: #4a4a4a; padding: 10px; border-radius: 8px; margin-bottom: 5px;">
+                                <span style="color: #ffffff;">🔗</span>
+                            </div>
+                            <div style="color: #cccccc; font-size: 0.9em;">LangChain</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- AI Models Used -->
+                <div style="margin-top: 20px; padding: 15px; background-color: #2a4a2a; border-radius: 8px;">
+                    <h4 style="color: #ffffff; margin-bottom: 10px;">🤖 Current Implementation:</h4>
+                    <div style="color: #cccccc; line-height: 1.6;">
+                        • <strong>OpenAI Whisper</strong> - Speech recognition and transcription<br>
+                        • <strong>Facebook BART</strong> - Text summarization and content generation<br>
+                        • <strong>Cardiff RoBERTa</strong> - Sentiment analysis and emotion detection<br>
+                        • <strong>LangChain</strong> - Text processing and workflow orchestration<br>
+                        • <strong>Gradio</strong> - Interactive web interface for seamless user experience
+                    </div>
+                </div>
+                
+                <div style="text-align: center; margin-top: 25px;">
+                    <button onclick="this.parentElement.parentElement.parentElement.style.display='none'" 
+                            style="background: #4ecdc4; color: #1a1a1a; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+                        Close Workflow
+                    </button>
+                </div>
+            </div>
+            """
+            return workflow_html
+        
+        def hide_workflow():
+            """Hide the workflow display"""
+            return ""
+        
         # Wire up the event handlers
         submit_btn.click(
             fn=process_meeting_audio,
@@ -640,6 +761,15 @@ Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             fn=clear_interface,
             inputs=[],
             outputs=[audio_input, output_display, download_file, status_display]
+        )
+        
+        # Workflow information display
+        workflow_display = gr.HTML()
+        
+        workflow_btn.click(
+            fn=show_workflow,
+            inputs=[],
+            outputs=[workflow_display]
         )
         
         # Footer with comprehensive information - Dark theme compatible
