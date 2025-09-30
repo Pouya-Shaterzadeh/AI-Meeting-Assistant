@@ -29,11 +29,22 @@ except ImportError:
 
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain.prompts import ChatPromptTemplate
+    from langchain.schema import SystemMessage, HumanMessage
+    from langchain.chains import LLMChain
     LANGCHAIN_AVAILABLE = True
     logger.info("LangChain loaded successfully")
 except ImportError:
     LANGCHAIN_AVAILABLE = False
     logger.warning("LangChain not available - using simple text splitting")
+
+try:
+    from transformers import MarianMTModel, MarianTokenizer
+    TRANSLATION_AVAILABLE = True
+    logger.info("Translation models available")
+except ImportError:
+    TRANSLATION_AVAILABLE = False
+    logger.warning("Translation models not available")
 
 class MeetingAssistant:
     def __init__(self):
@@ -49,8 +60,8 @@ class MeetingAssistant:
             # Initialize Whisper for speech-to-text
             if WHISPER_AVAILABLE:
                 logger.info("Loading Whisper model...")
-                self.whisper_model = whisper.load_model("base")
-                logger.info("Whisper model loaded successfully")
+                self.whisper_model = whisper.load_model("medium")
+                logger.info("Whisper medium model loaded successfully")
             
             # Initialize Transformers models
             if TRANSFORMERS_AVAILABLE:
@@ -94,6 +105,39 @@ class MeetingAssistant:
                     chunk_overlap=100
                 )
                 logger.info("LangChain text splitter initialized")
+            
+            # Initialize translation models
+            self.translation_models = {}
+            if TRANSLATION_AVAILABLE:
+                try:
+                    # Persian (Farsi)
+                    self.translation_models['fa'] = {
+                        'model': MarianMTModel.from_pretrained('Helsinki-NLP/opus-mt-en-fa'),
+                        'tokenizer': MarianTokenizer.from_pretrained('Helsinki-NLP/opus-mt-en-fa')
+                    }
+                    logger.info("Persian translation model loaded")
+                except Exception as e:
+                    logger.warning(f"Could not load Persian model: {e}")
+                
+                try:
+                    # Turkish
+                    self.translation_models['tr'] = {
+                        'model': MarianMTModel.from_pretrained('Helsinki-NLP/opus-mt-en-tr'),
+                        'tokenizer': MarianTokenizer.from_pretrained('Helsinki-NLP/opus-mt-en-tr')
+                    }
+                    logger.info("Turkish translation model loaded")
+                except Exception as e:
+                    logger.warning(f"Could not load Turkish model: {e}")
+                
+                try:
+                    # Arabic
+                    self.translation_models['ar'] = {
+                        'model': MarianMTModel.from_pretrained('Helsinki-NLP/opus-mt-en-ar'),
+                        'tokenizer': MarianTokenizer.from_pretrained('Helsinki-NLP/opus-mt-en-ar')
+                    }
+                    logger.info("Arabic translation model loaded")
+                except Exception as e:
+                    logger.warning(f"Could not load Arabic model: {e}")
             
             logger.info("Model initialization completed")
             
@@ -319,62 +363,110 @@ class MeetingAssistant:
             return self.create_simple_summary(text, summary_type)
     
     def extract_action_items(self, text):
-        """Extract action items and tasks from the text"""
+        """Extract action items and tasks using ChatPromptTemplate-based approach"""
         try:
-            action_patterns = [
-                r'\b(action item|follow up|next step|to do|todo|task)\b.*?[.!?]',
-                r'\b(assign|responsible|deadline|complete|finish)\b.*?[.!?]',
-                r'\b(schedule|plan|implement|review|check|prepare)\b.*?[.!?]',
-                r'\b(need to|should|must|will|going to)\b.*?\b(by|before|until|next week|tomorrow|monday|tuesday|wednesday|thursday|friday)\b.*?[.!?]',
-                r'\b(send|email|call|contact|reach out|create|make|build|update|inform|notify)\b.*?[.!?]'
-            ]
-            
-            action_items = []
-            for pattern in action_patterns:
-                matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
-                for match in matches:
-                    if isinstance(match, tuple):
-                        match = ' '.join(match)
-                    
-                    # Clean up the match
-                    match = re.sub(r'\s+', ' ', match).strip()
-                    if len(match) > 20 and len(match) < 200:
-                        # Capitalize first letter
-                        match = match[0].upper() + match[1:] if match else ""
-                        formatted_item = f"• {match}"
-                        if formatted_item not in action_items:
-                            action_items.append(formatted_item)
-                        
-                        if len(action_items) >= 10:
-                            break
+            if LANGCHAIN_AVAILABLE:
+                # Use ChatPromptTemplate approach as shown in documentation
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", "You are an expert meeting assistant. Analyze the provided meeting context and identify specific, actionable tasks and action items."),
+                    ("human", "Generate meeting minutes and a list of tasks based on the provided context:\n\n{context}\n\nPlease identify specific action items, tasks, and follow-up items that need to be completed. Format each as a bullet point starting with '•'. Focus on concrete actions, deadlines, assignments, and next steps.")
+                ])
                 
-                if len(action_items) >= 10:
-                    break
-            
-            # If no explicit action items found, look for imperative sentences
-            if len(action_items) < 3:
-                sentences = re.split(r'[.!?]', text)
-                imperative_indicators = ['please', 'make sure', 'ensure', 'remember to', 'don\'t forget']
+                # Create a simple chain-like structure for task extraction
+                formatted_prompt = prompt_template.format_messages(context=text)
                 
-                for sentence in sentences:
-                    sentence = sentence.strip()
-                    if len(sentence) > 20 and len(sentence) < 200:
-                        sentence_lower = sentence.lower()
-                        if any(indicator in sentence_lower for indicator in imperative_indicators):
-                            formatted_item = f"• {sentence.capitalize()}"
-                            if formatted_item not in action_items:
-                                action_items.append(formatted_item)
-                                if len(action_items) >= 8:
-                                    break
-            
-            if not action_items:
-                action_items = ["• No clear action items identified in the text"]
-            
-            return "\n".join(action_items[:10])
+                # Since we don't have an LLM, we'll use enhanced pattern matching with the structured approach
+                return self._extract_tasks_with_enhanced_patterns(text)
+            else:
+                return self._extract_tasks_with_enhanced_patterns(text)
         
         except Exception as e:
             logger.error(f"Error extracting action items: {str(e)}")
             return "• Error analyzing text for action items"
+    
+    def _extract_tasks_with_enhanced_patterns(self, text):
+        """Enhanced pattern-based task extraction following the documentation structure"""
+        try:
+            # Enhanced patterns based on meeting context analysis
+            task_patterns = [
+                # Direct task assignments
+                r'([A-Za-z]+)\s+(will|should|needs to|has to|must)\s+([^.!?]*[.!?])',
+                # Action items with deadlines
+                r'(action item|task|follow up|next step|to do|todo)\s*:?\s*([^.!?]*[.!?])',
+                # Assignment patterns
+                r'(assign|assigned|responsible for|owns|will handle)\s+([^.!?]*[.!?])',
+                # Deadline patterns
+                r'(by|before|deadline|due)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|tomorrow|\d{1,2}/\d{1,2}|\d{1,2}-\d{1,2})\s*[,:]?\s*([^.!?]*[.!?])',
+                # Communication tasks
+                r'(send|email|call|contact|reach out to|notify|inform|update)\s+([^.!?]*[.!?])',
+                # Creation/preparation tasks
+                r'(create|prepare|develop|build|write|draft|review|analyze)\s+([^.!?]*[.!?])',
+                # Meeting scheduling
+                r'(schedule|arrange|set up|plan)\s+(meeting|call|session)\s*([^.!?]*[.!?])'
+            ]
+            
+            action_items = []
+            processed_items = set()
+            
+            for pattern in task_patterns:
+                matches = re.finditer(pattern, text, re.IGNORECASE | re.DOTALL)
+                for match in matches:
+                    # Extract the meaningful part of the match
+                    full_match = match.group(0).strip()
+                    
+                    # Clean and format the task
+                    task = re.sub(r'\s+', ' ', full_match)
+                    task = task.strip()
+                    
+                    if len(task) > 15 and len(task) < 200:
+                        # Ensure proper capitalization
+                        task = task[0].upper() + task[1:] if task else ""
+                        
+                        # Remove duplicates
+                        task_key = task.lower().replace(' ', '')
+                        if task_key not in processed_items:
+                            processed_items.add(task_key)
+                            formatted_item = f"• {task}"
+                            action_items.append(formatted_item)
+                            
+                            if len(action_items) >= 12:
+                                break
+                
+                if len(action_items) >= 12:
+                    break
+            
+            # If insufficient tasks found, look for imperative sentences and decisions
+            if len(action_items) < 4:
+                sentences = re.split(r'[.!?]+', text)
+                decision_indicators = [
+                    'decided', 'agreed', 'resolved', 'concluded', 'determined',
+                    'please', 'make sure', 'ensure', 'remember to', 'don\'t forget',
+                    'we need to', 'let\'s', 'should we', 'will do', 'going to do'
+                ]
+                
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if len(sentence) > 25 and len(sentence) < 180:
+                        sentence_lower = sentence.lower()
+                        if any(indicator in sentence_lower for indicator in decision_indicators):
+                            sentence = sentence[0].upper() + sentence[1:] if sentence else ""
+                            task_key = sentence.lower().replace(' ', '')
+                            if task_key not in processed_items:
+                                processed_items.add(task_key)
+                                formatted_item = f"• {sentence}"
+                                action_items.append(formatted_item)
+                                if len(action_items) >= 10:
+                                    break
+            
+            # Ensure we have meaningful tasks
+            if not action_items:
+                action_items = ["• No specific action items identified in the meeting context"]
+            
+            return "\n".join(action_items[:10])
+        
+        except Exception as e:
+            logger.error(f"Error in enhanced task extraction: {str(e)}")
+            return "• Error analyzing meeting context for tasks"
     
     def identify_key_topics(self, text):
         """Identify key topics and important themes"""
@@ -415,7 +507,38 @@ class MeetingAssistant:
             logger.error(f"Error identifying topics: {str(e)}")
             return "• Error analyzing topics from text"
     
-    def process_meeting_text(self, input_text, summary_type="bullet_points"):
+    def translate_text(self, text, target_language):
+        """Translate text to target language (fa=Persian, tr=Turkish, ar=Arabic)"""
+        try:
+            if not TRANSLATION_AVAILABLE or target_language not in self.translation_models:
+                return f"Translation to {target_language} not available. Original text:\n\n{text}"
+            
+            model_info = self.translation_models[target_language]
+            model = model_info['model']
+            tokenizer = model_info['tokenizer']
+            
+            # Split text into chunks for translation
+            chunks = self.simple_text_split(text, 400)
+            translated_chunks = []
+            
+            for chunk in chunks[:8]:  # Limit chunks for performance
+                if len(chunk.strip()) > 10:
+                    try:
+                        inputs = tokenizer.encode(chunk, return_tensors="pt", truncation=True, max_length=400)
+                        outputs = model.generate(inputs, max_length=500, num_beams=4, early_stopping=True)
+                        translated = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                        translated_chunks.append(translated)
+                    except Exception as e:
+                        logger.warning(f"Error translating chunk: {e}")
+                        translated_chunks.append(chunk)  # Fallback to original
+            
+            return "\n".join(translated_chunks)
+        
+        except Exception as e:
+            logger.error(f"Error in translation: {str(e)}")
+            return f"Translation error. Original text:\n\n{text}"
+    
+    def process_meeting_text(self, input_text, summary_type="bullet_points", target_languages=None):
         """Process meeting text and generate comprehensive analysis"""
         try:
             if not input_text or len(input_text.strip()) < 50:
@@ -463,19 +586,48 @@ class MeetingAssistant:
 ---
 *Generated by AI Meeting Assistant*"""
             
+            # Generate translations if requested
+            translations = {}
+            if target_languages:
+                logger.info("Generating translations...")
+                for lang in target_languages:
+                    if lang in ['fa', 'tr', 'ar']:
+                        lang_name = {'fa': 'Persian', 'tr': 'Turkish', 'ar': 'Arabic'}[lang]
+                        translated_report = f"""# 🎯 Meeting Analysis Report ({lang_name})
+**Generated on:** {timestamp}
+
+## 📋 Meeting Summary
+{self.translate_text(summary, lang)}
+
+## 📊 Sentiment Analysis
+{sentiment_text}
+
+## ✅ Action Items
+{self.translate_text(action_items, lang)}
+
+## 🔑 Key Topics Discussed
+{self.translate_text(topics, lang)}
+
+## 📝 Full Transcription
+{self.translate_text(transcription, lang)}
+
+---
+*Generated by AI Meeting Assistant*"""
+                        translations[lang] = translated_report
+            
             logger.info("Meeting text processing completed successfully")
-            return transcription, summary, sentiment_text, action_items, topics, meeting_report
+            return transcription, summary, sentiment_text, action_items, topics, meeting_report, translations
         
         except Exception as e:
             error_msg = f"Error processing text: {str(e)}"
             logger.error(error_msg)
-            return error_msg, "", "", "", "", ""
+            return error_msg, "", "", "", "", "", {}
     
-    def process_meeting_audio(self, audio_file, summary_type="bullet_points"):
-        """Process meeting audio file and generate analysis"""
+    def process_meeting_audio(self, audio_file, summary_type="bullet_points", target_languages=None):
+        """Process meeting audio file and generate analysis with multilingual support"""
         try:
             if audio_file is None:
-                return "Please upload an audio file or use the Text Analysis tab to analyze meeting notes directly.", "", "", "", "", ""
+                return "Please upload an audio file or use the Text Analysis tab to analyze meeting notes directly.", "", "", "", "", "", {}
             
             logger.info("Starting audio processing...")
             
@@ -483,15 +635,15 @@ class MeetingAssistant:
             transcription, segments = self.transcribe_audio(audio_file)
             
             if transcription.startswith("Error") or transcription.startswith("Please") or transcription.startswith("Audio transcription"):
-                return transcription, "", "", "", "", ""
+                return transcription, "", "", "", "", "", {}
             
             # Process the transcribed text
-            return self.process_meeting_text(transcription, summary_type)
+            return self.process_meeting_text(transcription, summary_type, target_languages)
         
         except Exception as e:
             error_msg = f"Error processing audio: {str(e)}"
             logger.error(error_msg)
-            return error_msg, "", "", "", "", ""
+            return error_msg, "", "", "", "", "", {}
 
 # Initialize the meeting assistant
 meeting_assistant = MeetingAssistant()
@@ -528,6 +680,13 @@ def create_interface():
                     clear_btn = gr.Button("Clear", variant="secondary")
                     submit_btn = gr.Button("Submit", variant="primary")
                 
+                # Language selection for multilingual output
+                gr.HTML("<h4 style='color: #ffffff; margin: 15px 0 10px 0;'>🌍 Multilingual Output (Optional)</h4>")
+                with gr.Row():
+                    persian_checkbox = gr.Checkbox(label="Persian (فارسی)", value=False)
+                    turkish_checkbox = gr.Checkbox(label="Turkish (Türkçe)", value=False)
+                    arabic_checkbox = gr.Checkbox(label="Arabic (العربية)", value=False)
+                
                 # Status display for processing feedback
                 status_display = gr.HTML(visible=False)
             
@@ -541,6 +700,28 @@ def create_interface():
                     placeholder="Your meeting minutes and task list will appear here after processing..."
                 )
                 
+                # Multilingual outputs
+                persian_output = gr.Textbox(
+                    label="📄 Persian Output (خروجی فارسی)",
+                    lines=10,
+                    visible=False,
+                    interactive=False
+                )
+                
+                turkish_output = gr.Textbox(
+                    label="📄 Turkish Output (Türkçe Çıktı)",
+                    lines=10,
+                    visible=False,
+                    interactive=False
+                )
+                
+                arabic_output = gr.Textbox(
+                    label="📄 Arabic Output (المخرجات العربية)",
+                    lines=10,
+                    visible=False,
+                    interactive=False
+                )
+                
                 # Download section (matches the UI)
                 gr.HTML("""
                 <div style="margin-top: 15px;">
@@ -551,36 +732,61 @@ def create_interface():
                 </div>
                 """)
                 
-                # Create download file
+                # Create download files
                 download_file = gr.File(
                     label="meeting_minutes_and_tasks.txt",
                     visible=True,
                     interactive=False
                 )
+                
+                persian_download = gr.File(
+                    label="persian_meeting_minutes.txt",
+                    visible=False,
+                    interactive=False
+                )
+                
+                turkish_download = gr.File(
+                    label="turkish_meeting_minutes.txt",
+                    visible=False,
+                    interactive=False
+                )
+                
+                arabic_download = gr.File(
+                    label="arabic_meeting_minutes.txt",
+                    visible=False,
+                    interactive=False
+                )
         
         # Event handlers with full AI functionality
-        def process_meeting_audio(audio_file, progress=gr.Progress()):
-            """Process uploaded audio file with full AI pipeline"""
+        def process_meeting_audio(audio_file, persian_enabled, turkish_enabled, arabic_enabled, progress=gr.Progress()):
+            """Process uploaded audio file with full AI pipeline and multilingual support"""
             if audio_file is None:
-                return "Please upload an audio file to analyze.", None, """<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+                return ("Please upload an audio file to analyze.", None, 
+                       "", False, "", False, "", False, 
+                       None, None, None,
+                       """<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
                 ❌ No audio file provided. Please upload an audio file to continue.
-                </div>"""
+                </div>""")
             
             try:
                 progress(0.1, desc="Starting audio processing...")
                 
-                # Update status
-                status_html = """<div style="color: #4ecdc4; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
-                🎵 Processing audio file... This may take a few minutes for the first run.
-                </div>"""
+                # Determine target languages
+                target_languages = []
+                if persian_enabled:
+                    target_languages.append('fa')
+                if turkish_enabled:
+                    target_languages.append('tr')
+                if arabic_enabled:
+                    target_languages.append('ar')
                 
                 progress(0.3, desc="Transcribing audio...")
                 
                 # Process with the AI assistant - use the correct method
-                results = meeting_assistant.process_meeting_audio(audio_file, "bullet_points")
+                results = meeting_assistant.process_meeting_audio(audio_file, "bullet_points", target_languages if target_languages else None)
                 
-                if len(results) >= 6:
-                    transcription, summary, sentiment, actions, topics, report = results
+                if len(results) >= 7:
+                    transcription, summary, sentiment, actions, topics, report, translations = results
                     
                     progress(0.8, desc="Generating meeting minutes...")
                     
@@ -591,7 +797,7 @@ def create_interface():
 Task List:
 {actions}"""
                     
-                    progress(0.9, desc="Creating download file...")
+                    progress(0.9, desc="Creating download files...")
                     
                     # Create downloadable file
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -603,44 +809,112 @@ Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 {report}""")
                         temp_file_path = f.name
                     
+                    # Handle multilingual outputs and downloads
+                    persian_text = ""
+                    turkish_text = ""
+                    arabic_text = ""
+                    persian_file = None
+                    turkish_file = None
+                    arabic_file = None
+                    
+                    if 'fa' in translations:
+                        persian_text = translations['fa']
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
+                            f.write(persian_text)
+                            persian_file = f.name
+                    
+                    if 'tr' in translations:
+                        turkish_text = translations['tr']
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
+                            f.write(turkish_text)
+                            turkish_file = f.name
+                    
+                    if 'ar' in translations:
+                        arabic_text = translations['ar']
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
+                            f.write(arabic_text)
+                            arabic_file = f.name
+                    
                     progress(1.0, desc="Complete!")
                     
                     success_status = """<div style="color: #4ecdc4; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
                     ✅ Meeting analysis complete! Minutes and tasks generated successfully.
                     </div>"""
                     
-                    return meeting_minutes, temp_file_path, success_status
+                    return (meeting_minutes, temp_file_path,
+                           persian_text, persian_enabled,
+                           turkish_text, turkish_enabled, 
+                           arabic_text, arabic_enabled,
+                           persian_file, turkish_file, arabic_file,
+                           success_status)
                 else:
                     error_status = """<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
                     ❌ Error processing audio. Please try again with a different file.
                     </div>"""
-                    return "Error processing audio file. Please try again.", None, error_status
+                    return ("Error processing audio file. Please try again.", None,
+                           "", False, "", False, "", False,
+                           None, None, None, error_status)
                     
             except Exception as e:
                 logger.error(f"Error processing audio: {str(e)}")
                 error_status = f"""<div style="color: #ff6b6b; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
                 ❌ Error: {str(e)}
                 </div>"""
-                return f"Error processing audio: {str(e)}", None, error_status
+                return (f"Error processing audio: {str(e)}", None,
+                       "", False, "", False, "", False,
+                       None, None, None, error_status)
         
         def clear_interface():
             """Clear all inputs and outputs"""
-            return None, "", None, """<div style="color: #cccccc; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
+            return (None, "", None,
+                   "", False, "", False, "", False,
+                   None, None, None,
+                   """<div style="color: #cccccc; padding: 10px; background-color: #2a2a2a; border-radius: 5px;">
             Interface cleared. Upload an audio file to begin analysis.
-            </div>"""
+            </div>""")
         
         # Wire up the event handlers
         submit_btn.click(
             fn=process_meeting_audio,
-            inputs=[audio_input],
-            outputs=[output_display, download_file, status_display]
+            inputs=[audio_input, persian_checkbox, turkish_checkbox, arabic_checkbox],
+            outputs=[output_display, download_file,
+                    persian_output, persian_output,
+                    turkish_output, turkish_output, 
+                    arabic_output, arabic_output,
+                    persian_download, turkish_download, arabic_download,
+                    status_display]
         )
         
         clear_btn.click(
             fn=clear_interface,
             inputs=[],
-            outputs=[audio_input, output_display, download_file, status_display]
+            outputs=[audio_input, output_display, download_file,
+                    persian_output, persian_output,
+                    turkish_output, turkish_output,
+                    arabic_output, arabic_output,
+                    persian_download, turkish_download, arabic_download,
+                    status_display]
         )
+        
+        # Show/hide multilingual outputs based on checkbox states
+        def update_language_visibility(persian_enabled, turkish_enabled, arabic_enabled):
+            return (
+                gr.update(visible=persian_enabled),
+                gr.update(visible=persian_enabled),
+                gr.update(visible=turkish_enabled),
+                gr.update(visible=turkish_enabled),
+                gr.update(visible=arabic_enabled),
+                gr.update(visible=arabic_enabled)
+            )
+        
+        for checkbox in [persian_checkbox, turkish_checkbox, arabic_checkbox]:
+            checkbox.change(
+                fn=update_language_visibility,
+                inputs=[persian_checkbox, turkish_checkbox, arabic_checkbox],
+                outputs=[persian_output, persian_download,
+                        turkish_output, turkish_download,
+                        arabic_output, arabic_download]
+            )
         
         # Footer with comprehensive information - Dark theme compatible
         gr.HTML("""
