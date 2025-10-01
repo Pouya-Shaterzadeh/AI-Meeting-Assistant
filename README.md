@@ -17,6 +17,8 @@ tags:
 - multilingual
 - whisper
 - langchain
+thumbnail: >-
+  https://cdn-uploads.huggingface.co/production/uploads/688f59b4fe95b912726282f2/U_NjwBUEE1uVbXIJ1uuPd.png
 ---
 
 # 🎯 AI Meeting Assistant
