@@ -1,6 +1,6 @@
 ---
 title: AI Meeting Assistant by PouyaDevA1
-emoji: 🎯
+emoji: 📝
 colorFrom: blue
 colorTo: green
 sdk: gradio
