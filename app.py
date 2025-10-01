@@ -663,22 +663,57 @@ def create_interface():
         js=dark_theme_js
     ) as interface:
         
-        # Force dark theme CSS to prevent white flash
+        # Force dark theme CSS and add scrolling functionality
         gr.HTML("""
         <style>
         body, html {
             background-color: #0b0f19 !important;
             color: #ffffff !important;
+            height: 100vh;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
         .gradio-container {
             background-color: #0b0f19 !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
+        }
+        .app {
+            max-height: none !important;
+            height: auto !important;
+        }
+        /* Enhanced scrolling for text areas */
+        .scroll {
+            overflow-y: auto !important;
+            max-height: 600px !important;
+        }
+        /* Ensure content can scroll */
+        .contain {
+            max-height: none !important;
+            height: auto !important;
+        }
+        /* Custom scrollbar styling for dark theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #777;
         }
         </style>
         <div style="text-align: center; margin-bottom: 30px;">
             <h1 style="color: #ffffff; font-size: 2.5em; margin-bottom: 10px;">AI Meeting Assistant</h1>
             <p style="color: #cccccc; font-size: 1.1em; line-height: 1.4;">
                 Upload an audio file of a meeting. This tool will transcribe the audio, fix product-related terminology, and generate<br>
-                meeting minutes along with a list of tasks.
+                meeting minutes and with a list of tasks.
             </p>
         </div>
         """)
@@ -696,14 +731,16 @@ def create_interface():
                     clear_btn = gr.Button("Clear", variant="secondary")
                     submit_btn = gr.Button("Submit", variant="primary")
             
-            # Right column - Meeting Minutes and Tasks output (matches exactly)
+            # Right column - Meeting Minutes and Tasks output with scrolling
             with gr.Column(scale=1):
                 output_display = gr.Textbox(
                     label="Meeting Minutes and Tasks",
-                    lines=20,
+                    lines=25,  # Increased lines for better content display
+                    max_lines=40,  # Allow expansion up to 40 lines
                     show_label=True,
                     interactive=False,
-                    placeholder="Your meeting minutes and task list will appear here after processing..."
+                    placeholder="Your meeting minutes and task list will appear here after processing...",
+                    elem_classes=["scroll"]  # Add scroll class for enhanced scrolling
                 )
                 
                 # Download section (matches the UI)
