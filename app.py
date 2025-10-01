@@ -230,158 +230,242 @@ class MeetingAssistant:
             return "• Error analyzing text for action items"
     
     def _extract_tasks_with_enhanced_patterns(self, text, use_langchain_guidance=False):
-        """Enhanced pattern-based task extraction following ChatPromptTemplate structure"""
+        """Comprehensive task extraction with detailed coverage and multiple categories"""
         try:
-            # Advanced patterns following the documentation structure
+            # Comprehensive patterns for detailed task extraction
             if use_langchain_guidance:
-                # More sophisticated patterns when LangChain guidance is available
+                # Extensive patterns when LangChain guidance is available
                 task_patterns = [
-                    # Explicit assignments with names
-                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:will|should|needs? to|has to|must)\s+([^.!?]{10,80})',
-                    # Action items with deadlines
-                    r'(?:action item|task|todo|follow[- ]?up)\s*:?\s*([^.!?]{10,100})(?:\s+(?:by|before|due)\s+([^.!?]+))?',
-                    # Commitments and promises
-                    r'(?:commit(?:ted)?|promise[ds]?|agree[ds]?)\s+to\s+([^.!?]{10,80})',
-                    # Next steps and implementation
-                    r'(?:next step|implementation|plan)\s*:?\s*([^.!?]{10,100})',
-                    # Review and approval tasks
-                    r'(?:review|approve|check|verify|validate)\s+([^.!?]{10,80})(?:\s+(?:by|before)\s+([^.!?]+))?',
-                    # Communication tasks
-                    r'(?:send|email|call|contact|reach out|inform|notify|communicate)\s+([^.!?]{10,80})',
-                    # Time-bound actions
-                    r'(?:by|before|due|until)\s+(\w+day|next week|\d+\/\d+|tomorrow)\s*:?\s*([^.!?]{10,80})',
+                    # Explicit assignments with names and roles
+                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:\s+(?:from|in)\s+[A-Za-z\s]+)?)[\s,]*(?:will|should|needs? to|has to|must|is responsible for|assigned to)\s+([^.!?]{8,120})',
+                    # Action items with deadlines and contexts
+                    r'(?:action item|task|todo|follow[- ]?up|deliverable|milestone)\s*[:]?\s*([^.!?]{8,150})(?:\s+(?:by|before|due|until|deadline|target date)\s+([^.!?]+))?',
+                    # Commitments and agreements
+                    r'(?:commit(?:ted)?|promise[ds]?|agree[ds]?|decided?|resolved?)\s+(?:to\s+)?([^.!?]{8,100})',
+                    # Next steps and implementation plans
+                    r'(?:next step|implementation|plan|strategy|approach|initiative|project)\s*[:]?\s*([^.!?]{8,150})',
+                    # Review and approval workflows
+                    r'(?:review|approve|check|verify|validate|audit|assess|evaluate|examine)\s+([^.!?]{8,100})(?:\s+(?:by|before|with|from)\s+([^.!?]+))?',
+                    # Communication and coordination tasks
+                    r'(?:send|email|call|contact|reach out|inform|notify|communicate|coordinate|schedule|arrange|organize)\s+([^.!?]{8,100})',
+                    # Time-bound actions and deadlines
+                    r'(?:by|before|due|until|deadline|target)\s+(\w+day|next week|\d+[/\-]\d+|tomorrow|this week|end of|Q\d)\s*[:]?\s*([^.!?]{8,100})',
+                    # Research and analysis tasks
+                    r'(?:research|analyze|investigate|study|explore|examine|look into)\s+([^.!?]{8,100})',
+                    # Creation and development tasks
+                    r'(?:create|develop|build|design|write|prepare|draft|produce|generate)\s+([^.!?]{8,100})',
+                    # Meeting and discussion items
+                    r'(?:meet|discuss|present|report|update|brief|sync)\s+(?:with|about|on)?\s*([^.!?]{8,100})',
+                    # Process and workflow tasks
+                    r'(?:process|handle|manage|coordinate|execute|implement|deploy)\s+([^.!?]{8,100})',
+                    # Training and development
+                    r'(?:train|teach|learn|study|improve|develop|enhance)\s+([^.!?]{8,100})'
                 ]
             else:
-                # Simpler patterns for fallback
+                # Comprehensive patterns for fallback
                 task_patterns = [
-                    r'(?:action item|task|todo)\s*:?\s*([^.!?]{10,80})',
-                    r'(?:need to|should|must)\s+([^.!?]{10,80})',
-                    r'([A-Z]\w+)\s+(?:will|should)\s+([^.!?]{10,80})',
-                    r'(?:by|before)\s+\w+day\s*:?\s*([^.!?]{10,80})',
+                    r'(?:action item|task|todo|assignment)\s*[:]?\s*([^.!?]{8,100})',
+                    r'(?:need to|should|must|have to|required to)\s+([^.!?]{8,100})',
+                    r'([A-Z]\w+(?:\s+[A-Z]\w+)?)\s+(?:will|should|needs to)\s+([^.!?]{8,100})',
+                    r'(?:by|before|due)\s+\w+day\s*[:]?\s*([^.!?]{8,100})',
+                    r'(?:complete|finish|send|create|prepare|review|schedule|plan|update|check)\s+([^.!?]{8,100})',
+                    r'(?:follow up|reach out|contact|coordinate)\s+([^.!?]{8,100})'
                 ]
             
             tasks = []
-            processed_text = text[:1500] if len(text) > 1500 else text  # Speed optimization
+            # Process more text for comprehensive coverage
+            processed_text = text[:3000] if len(text) > 3000 else text
             
-            # Process patterns
+            # Process patterns with enhanced extraction
             for pattern in task_patterns:
                 matches = re.finditer(pattern, processed_text, re.IGNORECASE)
                 for match in matches:
                     groups = match.groups()
                     
                     if len(groups) >= 2 and groups[0] and groups[1]:
-                        # Name + action + optional deadline
+                        # Name + action + optional deadline/context
                         person = groups[0].strip()
                         action = groups[1].strip()
-                        deadline = groups[2].strip() if len(groups) > 2 and groups[2] else None
+                        context = groups[2].strip() if len(groups) > 2 and groups[2] else None
                         
-                        if deadline:
-                            task = f"• {person} will {action} by {deadline}"
+                        if context:
+                            task = f"• {person}: {action} ({context})"
                         else:
-                            task = f"• {person} will {action}"
+                            task = f"• {person}: {action}"
                     elif len(groups) >= 1 and groups[0]:
-                        # Just action
+                        # Just action with enhanced formatting
                         action = groups[0].strip()
+                        # Clean up the action text
+                        action = re.sub(r'^(to\s+|the\s+)', '', action, flags=re.IGNORECASE)
                         task = f"• {action.capitalize()}"
                     else:
                         continue
                     
-                    # Quality checks
-                    if (len(task) > 15 and len(task) < 150 and 
+                    # Enhanced quality checks
+                    if (len(task) > 10 and len(task) < 200 and 
                         task not in tasks and
-                        not any(word in task.lower() for word in ['said', 'mentioned', 'discussed'])):
+                        not any(word in task.lower() for word in ['said', 'mentioned', 'discussed', 'talked about'])):
                         tasks.append(task)
                     
-                    if len(tasks) >= 8:  # Limit for performance
+                    if len(tasks) >= 15:  # Increased limit for more comprehensive coverage
                         break
                 
-                if len(tasks) >= 8:
+                if len(tasks) >= 15:
                     break
             
-            # If still no tasks found, try simpler patterns
-            if len(tasks) < 2:
-                simple_patterns = [
-                    r'(complete|finish|send|create|prepare|review|schedule|plan)\s+([^.!?]{10,60})',
-                    r'(follow up|check|update|inform|contact)\s+([^.!?]{10,60})',
+            # Enhanced secondary patterns for more coverage
+            if len(tasks) < 5:
+                extended_patterns = [
+                    r'(complete|finish|send|create|prepare|review|schedule|plan|update|check|coordinate|manage|handle|process|implement|deploy|develop|design|write|draft|research|analyze|investigate|meet|discuss|present|report|brief|train|learn|improve)\s+([^.!?]{8,80})',
+                    r'(follow up|reach out|set up|sign up|clean up|wrap up|catch up|pick up|get back)\s+([^.!?]{8,80})',
+                    r'(work on|focus on|look at|think about|decide on)\s+([^.!?]{8,80})',
+                    r'(?:we|team|I|they)\s+(?:will|should|need to|have to|must)\s+([^.!?]{8,100})',
+                    r'(?:responsible for|in charge of|handling|managing)\s+([^.!?]{8,100})'
                 ]
                 
-                for pattern in simple_patterns:
+                for pattern in extended_patterns:
                     matches = re.finditer(pattern, processed_text, re.IGNORECASE)
                     for match in matches:
-                        action = match.group(0).strip()
-                        task = f"• {action.capitalize()}"
-                        if task not in tasks and len(task) > 15:
+                        if len(match.groups()) >= 2:
+                            verb = match.group(1).strip()
+                            action = match.group(2).strip()
+                            task = f"• {verb.capitalize()} {action}"
+                        else:
+                            action = match.group(1).strip()
+                            task = f"• {action.capitalize()}"
+                        
+                        if (task not in tasks and len(task) > 10 and len(task) < 200 and
+                            not any(word in task.lower() for word in ['said', 'mentioned', 'discussed'])):
                             tasks.append(task)
-                        if len(tasks) >= 6:
+                        if len(tasks) >= 12:
                             break
             
-            # Return results
+            # If still insufficient tasks, extract from sentence structure
+            if len(tasks) < 3:
+                sentences = re.split(r'[.!?]+', processed_text)
+                for sentence in sentences[:30]:
+                    sentence = sentence.strip()
+                    if len(sentence) > 20:
+                        # Look for imperative or future tense structures
+                        if (re.search(r'\b(will|shall|going to|need to|have to|must|should)\b', sentence, re.IGNORECASE) or
+                            re.search(r'^(let\'s|we should|team will|plan to)', sentence, re.IGNORECASE)):
+                            
+                            # Clean and format as task
+                            clean_sentence = re.sub(r'^(so|and|but|also|then)\s+', '', sentence, flags=re.IGNORECASE)
+                            task = f"• {clean_sentence.capitalize()}"
+                            
+                            if (task not in tasks and len(task) > 15 and len(task) < 200):
+                                tasks.append(task)
+                                if len(tasks) >= 8:
+                                    break
+            
+            # Return comprehensive results
             if not tasks:
-                return "• No specific action items identified in the meeting transcript"
+                return "• No specific action items or tasks identified in the meeting discussion\n• Consider reviewing the meeting content for implicit action items or follow-ups"
             
             return "\n".join(tasks)
             
         except Exception as e:
-            logger.error(f"Error in enhanced task extraction: {e}")
-            return "• Error extracting tasks from meeting content"
+            logger.error(f"Error in comprehensive task extraction: {e}")
+            return "• Error extracting tasks from meeting content\n• Please review the meeting transcript manually for action items"
     
     def summarize_text(self, text):
-        """Ultra-fast summarization with lazy loading"""
+        """Comprehensive summarization with detailed coverage"""
         try:
             # Lazy load summarizer only when needed
             if TRANSFORMERS_AVAILABLE:
                 self._load_summarizer()
             
             if self.summarizer and len(text) > 100:
-                # Speed optimized summarization
-                text_sample = text[:1000]  # Limit for speed
+                # Use longer text sample for more comprehensive summary
+                text_sample = text[:2000]  # Increased for better coverage
                 summary = self.summarizer(
                     text_sample,
-                    max_length=100,  # Shorter for speed
-                    min_length=30,
+                    max_length=200,  # Longer for more details
+                    min_length=80,   # Ensure substantial content
                     do_sample=False,
-                    num_beams=1  # Fastest beam search
+                    num_beams=2      # Better quality
                 )[0]['summary_text']
                 
-                return summary
+                # Enhance with detailed fallback to ensure comprehensive coverage
+                detailed_summary = self.enhanced_fallback_summary(text)
+                return f"{summary}\n\n{detailed_summary}"
             else:
-                return self.fallback_summary(text)
+                return self.enhanced_fallback_summary(text)
         
         except Exception as e:
             logger.error(f"Error in summarization: {str(e)}")
-            return self.fallback_summary(text)
+            return self.enhanced_fallback_summary(text)
     
-    def fallback_summary(self, text):
-        """Fast fallback summarization without AI models"""
+    def enhanced_fallback_summary(self, text):
+        """Comprehensive fallback summarization with detailed bullet points"""
         try:
             sentences = re.split(r'[.!?]+', text)
-            # Get first few sentences and key sentences with important keywords
-            key_phrases = ['decision', 'action', 'important', 'key', 'main', 'summary', 'conclusion', 'result']
             
-            summary_sentences = []
-            # Always include first sentence if it's substantial
-            if sentences and len(sentences[0].strip()) > 20:
-                summary_sentences.append(sentences[0].strip())
+            # Expanded key phrases for comprehensive coverage
+            key_categories = {
+                'financial': ['revenue', 'profit', 'budget', 'cost', 'investment', 'financial', 'money', 'funding', 'quarter', 'forecast'],
+                'business': ['strategy', 'business', 'market', 'customer', 'product', 'service', 'growth', 'expansion', 'competition'],
+                'operational': ['process', 'operation', 'workflow', 'efficiency', 'performance', 'quality', 'timeline', 'deadline'],
+                'decisions': ['decision', 'approve', 'reject', 'choose', 'select', 'agree', 'disagree', 'vote', 'consensus'],
+                'updates': ['update', 'progress', 'status', 'report', 'achievement', 'milestone', 'completion', 'result'],
+                'planning': ['plan', 'strategy', 'roadmap', 'goal', 'objective', 'target', 'initiative', 'project'],
+                'issues': ['problem', 'issue', 'concern', 'risk', 'challenge', 'obstacle', 'difficulty', 'blocker'],
+                'people': ['team', 'staff', 'employee', 'hire', 'promotion', 'training', 'resource', 'department']
+            }
             
-            # Find sentences with key phrases
-            for sentence in sentences[1:10]:  # Check first 10 sentences
+            categorized_points = {category: [] for category in key_categories}
+            general_points = []
+            
+            # Process all sentences for comprehensive coverage
+            for sentence in sentences[:50]:  # Analyze more sentences
                 sentence = sentence.strip()
-                if len(sentence) > 30:
+                if len(sentence) > 25:  # Slightly lower threshold
                     sentence_lower = sentence.lower()
-                    if any(phrase in sentence_lower for phrase in key_phrases):
-                        summary_sentences.append(sentence)
-                        if len(summary_sentences) >= 4:
-                            break
+                    
+                    # Categorize sentences
+                    categorized = False
+                    for category, keywords in key_categories.items():
+                        if any(keyword in sentence_lower for keyword in keywords):
+                            if len(categorized_points[category]) < 3:  # Limit per category
+                                categorized_points[category].append(sentence)
+                                categorized = True
+                                break
+                    
+                    # Add to general if not categorized and we need more content
+                    if not categorized and len(general_points) < 5:
+                        general_points.append(sentence)
             
-            if summary_sentences:
-                return ". ".join(summary_sentences) + "."
+            # Build comprehensive summary
+            summary_parts = []
+            
+            for category, points in categorized_points.items():
+                if points:
+                    category_title = category.replace('_', ' ').title()
+                    for point in points:
+                        summary_parts.append(f"• {point}")
+            
+            # Add general points if we have space
+            for point in general_points[:3]:
+                summary_parts.append(f"• {point}")
+            
+            if summary_parts:
+                return "\n".join(summary_parts)
             else:
-                # Last resort: first 200 characters
-                return text[:200] + "..." if len(text) > 200 else text
+                # Fallback: extract first substantial sentences
+                substantial_sentences = [s.strip() for s in sentences[:8] if len(s.strip()) > 30]
+                if substantial_sentences:
+                    return "\n".join([f"• {s}" for s in substantial_sentences[:6]])
+                else:
+                    return f"• {text[:300]}..." if len(text) > 300 else f"• {text}"
         
         except Exception as e:
-            logger.error(f"Error in fallback summary: {str(e)}")
-            return "Summary not available"
+            logger.error(f"Error in enhanced summary: {str(e)}")
+            return "• Comprehensive summary not available"
+    
+    def fallback_summary(self, text):
+        """Maintain original method for compatibility"""
+        return self.enhanced_fallback_summary(text)
     
     def analyze_sentiment(self, text):
         """Ultra-fast sentiment analysis with lazy loading"""
