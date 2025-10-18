@@ -727,6 +727,14 @@ def create_interface():
                     show_label=False
                 )
                 
+                # Add sample audio example for testing
+                gr.Examples(
+                    examples=[["sample_meeting.wav"]],
+                    inputs=audio_input,
+                    label="📝 Try this sample meeting audio:",
+                    examples_per_page=1
+                )
+                
                 with gr.Row():
                     clear_btn = gr.Button("Clear", variant="secondary")
                     submit_btn = gr.Button("Submit", variant="primary")
