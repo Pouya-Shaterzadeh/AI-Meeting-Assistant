@@ -8,12 +8,19 @@ import time
 
 # Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
 import gradio_client.utils as _gc_utils
-_orig_get_type = _gc_utils.get_type
-def _safe_get_type(schema):
+_orig_json_schema_to_python_type = _gc_utils.json_schema_to_python_type
+def _safe_json_schema_to_python_type(schema):
     if not isinstance(schema, dict):
         return "any"
-    return _orig_get_type(schema)
-_gc_utils.get_type = _safe_get_type
+    return _orig_json_schema_to_python_type(schema)
+_gc_utils.json_schema_to_python_type = _safe_json_schema_to_python_type
+
+_orig_json_schema_to_python_type_priv = _gc_utils._json_schema_to_python_type
+def _safe_json_schema_to_python_type_priv(schema, defs):
+    if not isinstance(schema, dict):
+        return "any"
+    return _orig_json_schema_to_python_type_priv(schema, defs)
+_gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type_priv
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
