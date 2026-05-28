@@ -28,11 +28,15 @@ _gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type_priv
 
 # Debug TemplateResponse args
 import starlette.templating as _st
+import starlette
+import jinja2
+import sys
+print("STARLETTE VERSION=" + starlette.__version__, file=sys.stderr, flush=True)
+print("JINJA2 VERSION=" + jinja2.__version__, file=sys.stderr, flush=True)
 _orig_TR = _st.Jinja2Templates.TemplateResponse
 def _debug_TR(self, *args, **kwargs):
-    _gc_logger.warning(f"TemplateResponse args count={len(args)}")
-    for i, a in enumerate(args):
-        _gc_logger.warning(f"  arg[{i}]: type={type(a).__name__} repr={str(a)[:200]}")
+    print("DEBUG_TEMPLATE_ARGS=" + repr(args), file=sys.stderr, flush=True)
+    print("DEBUG_TEMPLATE_KWARGS=" + repr(kwargs), file=sys.stderr, flush=True)
     return _orig_TR(self, *args, **kwargs)
 _st.Jinja2Templates.TemplateResponse = _debug_TR
 
