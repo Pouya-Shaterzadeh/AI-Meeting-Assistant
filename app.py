@@ -835,7 +835,7 @@ if __name__ == "__main__":
         inbrowser=False,
         show_error=True,
         quiet=False,
-        ssr_mode=False,  # Disable SSR to prevent theme detection
+        #ssr_mode=False,  # Disable SSR to prevent theme detection
         favicon_path=None,
         app_kwargs={"docs_url": None, "redoc_url": None}
     )
