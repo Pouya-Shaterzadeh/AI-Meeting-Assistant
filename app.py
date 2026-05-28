@@ -26,19 +26,7 @@ def _safe_json_schema_to_python_type_priv(schema, defs):
     return _orig_json_schema_to_python_type_priv(schema, defs)
 _gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type_priv
 
-# Debug TemplateResponse args
-import starlette.templating as _st
-import starlette
-import jinja2
-import sys
-print("STARLETTE VERSION=" + starlette.__version__, file=sys.stderr, flush=True)
-print("JINJA2 VERSION=" + jinja2.__version__, file=sys.stderr, flush=True)
-_orig_TR = _st.Jinja2Templates.TemplateResponse
-def _debug_TR(self, *args, **kwargs):
-    print("DEBUG_TEMPLATE_ARGS=" + repr(args), file=sys.stderr, flush=True)
-    print("DEBUG_TEMPLATE_KWARGS=" + repr(kwargs), file=sys.stderr, flush=True)
-    return _orig_TR(self, *args, **kwargs)
-_st.Jinja2Templates.TemplateResponse = _debug_TR
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -848,6 +836,8 @@ meeting_assistant = MeetingAssistant()
 # Initialize and launch with speed optimizations
 demo = create_interface()
 demo.launch(
+    server_name="0.0.0.0",
+    server_port=7860,
     inbrowser=False,
     show_error=True,
     quiet=False,
