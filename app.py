@@ -6,6 +6,15 @@ import re
 import logging
 import time
 
+# Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
+import gradio_client.utils as _gc_utils
+_orig_get_type = _gc_utils.get_type
+def _safe_get_type(schema):
+    if not isinstance(schema, dict):
+        return "any"
+    return _orig_get_type(schema)
+_gc_utils.get_type = _safe_get_type
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -620,18 +629,18 @@ Task List:
 
 def process_meeting_audio(audio_file):
     if audio_file is None:
-        return "Please upload an audio file to analyze."
+        return "Please upload an audio file to analyze.", None
 
     meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file)
 
     if meeting_report and not meeting_report.startswith("Error"):
-        return meeting_report
+        return meeting_report, temp_file
     else:
-        return "Error processing audio file. Please try again."
+        return "Error processing audio file. Please try again.", None
 
 
 def clear_interface():
-    return None, ""
+    return None, "", None
 
 
 def create_interface():
@@ -766,18 +775,28 @@ def create_interface():
                     placeholder="Your meeting minutes and task list will appear here after processing...",
                     elem_classes=["scroll"]  # Add scroll class for enhanced scrolling
                 )
+                
+                # Download section (matches the UI)
+                gr.Markdown("### Download the Generated Meeting Minutes and Tasks")
+                
+                # Create download file
+                download_file = gr.File(
+                    label="meeting_minutes_and_tasks.txt",
+                    visible=True,
+                    interactive=False
+                )
         
         # Wire up the event handlers
         submit_btn.click(
             fn=process_meeting_audio,
             inputs=[audio_input],
-            outputs=[output_display]
+            outputs=[output_display, download_file]
         )
         
         clear_btn.click(
             fn=clear_interface,
             inputs=[],
-            outputs=[audio_input, output_display]
+            outputs=[audio_input, output_display, download_file]
         )
         
         # Footer with enhanced info
