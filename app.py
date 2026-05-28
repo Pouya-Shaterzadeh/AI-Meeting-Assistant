@@ -762,21 +762,21 @@ def create_interface():
                 )
         
         # Event handlers with ultra-fast processing
-        def process_meeting_audio(audio_file, progress=gr.Progress()):
+        def process_meeting_audio(audio_file):
             """Process uploaded audio file with ultra-fast AI pipeline"""
             if audio_file is None:
                 return "Please upload an audio file to analyze.", None
             
             try:
-                progress(0.1, desc="Starting ultra-fast processing...")
+                #progress(0.1, desc="Starting ultra-fast processing...")
                 
-                progress(0.3, desc="Transcribing with Whisper tiny model...")
+                #progress(0.3, desc="Transcribing with Whisper tiny model...")
                 
                 # Process with the optimized AI assistant method
                 meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file)
                 
                 if meeting_report and not meeting_report.startswith("Error"):
-                    progress(1.0, desc="Complete!")
+                    #progress(1.0, desc="Complete!")
                     return meeting_report, temp_file
                 else:
                     return "Error processing audio file. Please try again.", None
