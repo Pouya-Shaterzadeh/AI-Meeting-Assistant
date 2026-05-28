@@ -1,5 +1,5 @@
 # Ultra-Fast AI Meeting Assistant Dependencies
-gradio==4.44.0
+gradio==4.44.1
 
 # Core AI Models (optimized for speed)
 torch>=2.0.0
