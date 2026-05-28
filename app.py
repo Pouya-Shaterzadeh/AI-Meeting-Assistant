@@ -618,6 +618,22 @@ Task List:
 {actions}"""
 
 
+def process_meeting_audio(audio_file):
+    if audio_file is None:
+        return "Please upload an audio file to analyze."
+
+    meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file)
+
+    if meeting_report and not meeting_report.startswith("Error"):
+        return meeting_report
+    else:
+        return "Error processing audio file. Please try again."
+
+
+def clear_interface():
+    return None, ""
+
+
 def create_interface():
     """Create ultra-fast Gradio interface matching the reference image"""
     
@@ -750,56 +766,18 @@ def create_interface():
                     placeholder="Your meeting minutes and task list will appear here after processing...",
                     elem_classes=["scroll"]  # Add scroll class for enhanced scrolling
                 )
-                
-                # Download section (matches the UI)
-                gr.Markdown("### Download the Generated Meeting Minutes and Tasks")
-                
-                # Create download file
-                download_file = gr.File(
-                    label="meeting_minutes_and_tasks.txt",
-                    visible=True,
-                    interactive=False
-                )
-        
-        # Event handlers with ultra-fast processing
-        def process_meeting_audio(audio_file):
-            """Process uploaded audio file with ultra-fast AI pipeline"""
-            if audio_file is None:
-                return "Please upload an audio file to analyze.", None
-            
-            try:
-                #progress(0.1, desc="Starting ultra-fast processing...")
-                
-                #progress(0.3, desc="Transcribing with Whisper tiny model...")
-                
-                # Process with the optimized AI assistant method
-                meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file)
-                
-                if meeting_report and not meeting_report.startswith("Error"):
-                    #progress(1.0, desc="Complete!")
-                    return meeting_report, temp_file
-                else:
-                    return "Error processing audio file. Please try again.", None
-                    
-            except Exception as e:
-                logger.error(f"Error processing audio: {str(e)}")
-                return f"Error processing audio: {str(e)}", None
-        
-        def clear_interface():
-            """Clear all inputs and outputs"""
-            return None, "", None
         
         # Wire up the event handlers
         submit_btn.click(
             fn=process_meeting_audio,
             inputs=[audio_input],
-            outputs=[output_display, download_file]
+            outputs=[output_display]
         )
         
         clear_btn.click(
             fn=clear_interface,
             inputs=[],
-            outputs=[audio_input, output_display, download_file]
+            outputs=[audio_input, output_display]
         )
         
         # Footer with enhanced info
@@ -824,18 +802,11 @@ def create_interface():
 meeting_assistant = MeetingAssistant()
 
 # Initialize and launch with speed optimizations
-if __name__ == "__main__":
-    print("🚀 Starting AI Meeting Assistant with ultra-fast optimizations...")
-    print("⚡ Using lazy loading for instant startup")
-    print("🧠 Models will load only when needed")
-    print("🔗 ChatPromptTemplate chains ready for enhanced accuracy")
-    
-    demo = create_interface()
-    demo.launch(
-        inbrowser=False,
-        show_error=True,
-        quiet=False,
-        #ssr_mode=False,  # Disable SSR to prevent theme detection
-        favicon_path=None,
-        app_kwargs={"docs_url": None, "redoc_url": None}
-    )
+demo = create_interface()
+demo.launch(
+    inbrowser=False,
+    show_error=True,
+    quiet=False,
+    favicon_path=None,
+    app_kwargs={"docs_url": None, "redoc_url": None}
+)
