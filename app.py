@@ -8,9 +8,12 @@ import time
 
 # Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
 import gradio_client.utils as _gc_utils
+import logging
+_gc_logger = logging.getLogger("gradio_client_patch")
 _orig_json_schema_to_python_type = _gc_utils.json_schema_to_python_type
 def _safe_json_schema_to_python_type(schema):
     if not isinstance(schema, dict):
+        _gc_logger.warning(f"json_schema_to_python_type got non-dict schema: {type(schema).__name__}={schema}")
         return "any"
     return _orig_json_schema_to_python_type(schema)
 _gc_utils.json_schema_to_python_type = _safe_json_schema_to_python_type
@@ -18,9 +21,20 @@ _gc_utils.json_schema_to_python_type = _safe_json_schema_to_python_type
 _orig_json_schema_to_python_type_priv = _gc_utils._json_schema_to_python_type
 def _safe_json_schema_to_python_type_priv(schema, defs):
     if not isinstance(schema, dict):
-        return "any"
+        _gc_logger.warning(f"_json_schema_to_python_type got non-dict schema: {type(schema).__name__}={schema}")
+        return "str"
     return _orig_json_schema_to_python_type_priv(schema, defs)
 _gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type_priv
+
+# Debug TemplateResponse args
+import starlette.templating as _st
+_orig_TR = _st.Jinja2Templates.TemplateResponse
+def _debug_TR(self, *args, **kwargs):
+    _gc_logger.warning(f"TemplateResponse args count={len(args)}")
+    for i, a in enumerate(args):
+        _gc_logger.warning(f"  arg[{i}]: type={type(a).__name__} repr={str(a)[:200]}")
+    return _orig_TR(self, *args, **kwargs)
+_st.Jinja2Templates.TemplateResponse = _debug_TR
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
