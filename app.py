@@ -51,8 +51,12 @@ except ImportError:
     logger.warning("⚠️ Transformers not available - using fallback methods")
 
 try:
-    from langchain.prompts import ChatPromptTemplate, PromptTemplate
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    try:
+        from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+    except ImportError:
+        from langchain.prompts import ChatPromptTemplate, PromptTemplate
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
     LANGCHAIN_AVAILABLE = True
     logger.info("✅ LangChain loaded successfully")
 except ImportError:
@@ -631,13 +635,27 @@ class MeetingAssistant:
             return error_msg, None
     
     def _generate_meeting_report(self, transcript, summary, actions, sentiment, topics):
-        """Generate meeting report in the exact format from the attached image"""
-        
-        return f"""Meeting Minutes:
+        """Generate meeting report with brutalist terminal formatting"""
+        sep = "=" * 52
+        return f"""{sep}
+                  MEETING ANALYSIS REPORT
+{sep}
+
+>> SUMMARY
 {summary}
 
-Task List:
-{actions}"""
+>> TASK LIST
+{actions}
+
+>> SENTIMENT
+{sentiment}
+
+>> KEY TOPICS
+{topics}
+
+{sep}
+          PROCESSED BY AI MEETING ASSISTANT
+{sep}"""
 
 
 def process_meeting_audio(audio_file):
@@ -656,154 +674,706 @@ def clear_interface():
     return None, "", None
 
 
-def create_interface():
-    """Create ultra-fast Gradio interface matching the reference image"""
+
+# Gradio 6.x – custom JS for brutalist theme, animations, and Gradio footer removal
+custom_js = """
+function() {
+    document.documentElement.classList.add('brutalist');
+    document.body.classList.add('brutalist');
     
-    # Force dark theme with custom JS to prevent white flash and theme detection
-    dark_theme_js = """
-    function() {
-        // Force dark theme immediately
-        document.documentElement.setAttribute('data-theme', 'dark');
-        document.documentElement.classList.add('dark');
-        document.body.style.backgroundColor = '#0b0f19';
-        document.body.classList.add('dark');
-        
-        // Override any theme detection
-        if (window.gradio_config) {
-            window.gradio_config.theme = 'dark';
-        }
-        
-        // Prevent system theme queries
-        if (window.matchMedia) {
-            const originalMatchMedia = window.matchMedia;
-            window.matchMedia = function(query) {
-                if (query.includes('prefers-color-scheme')) {
-                    return { matches: false, media: query, addListener: function() {}, removeListener: function() {} };
-                }
-                return originalMatchMedia(query);
-            };
-        }
-        
-        return [];
+    if (window.matchMedia) {
+        var origMatchMedia = window.matchMedia;
+        window.matchMedia = function(query) {
+            if (query.includes('prefers-color-scheme')) {
+                return {
+                    matches: false,
+                    media: query,
+                    addEventListener: function() {},
+                    removeEventListener: function() {},
+                    addListener: function() {},
+                    removeListener: function() {}
+                };
+            }
+            return origMatchMedia(query);
+        };
     }
-    """
+    
+    setTimeout(function() {
+        document.body.classList.add('loaded');
+        var staggerEls = document.querySelectorAll('.stagger-in');
+        staggerEls.forEach(function(el, i) {
+            setTimeout(function() {
+                el.classList.add('visible');
+            }, i * 100);
+        });
+    }, 300);
+    
+    var hideFooter = setInterval(function() {
+        var footer = document.querySelector('.built-with-gradio, gradio-app footer:not(.brutal-footer)');
+        if (footer) {
+            footer.style.display = 'none';
+            footer.remove();
+            clearInterval(hideFooter);
+        }
+    }, 150);
+    setTimeout(function() { clearInterval(hideFooter); }, 8000);
+    
+    setTimeout(function() {
+        var outputWrapper = document.querySelector('#output-terminal');
+        if (outputWrapper) {
+            var observer = new MutationObserver(function() {
+                var textarea = outputWrapper.querySelector('textarea');
+                if (textarea && textarea.value && textarea.value.trim().length > 0) {
+                    textarea.classList.add('has-content');
+                }
+            });
+            observer.observe(outputWrapper, { childList: true, subtree: true, characterData: true });
+        }
+    }, 1000);
+    
+    /* ═══════════════════════════════════════════
+       UPLOAD STATUS — global helpers + document-level listeners
+       ═══════════════════════════════════════════ */
+    window.__uploadStatus = {
+        el: null,
+        _get: function() {
+            if (!this.el) this.el = document.getElementById('upload-status');
+            return this.el;
+        },
+        set: function(state, text) {
+            var el = this._get();
+            if (!el) return;
+            el.className = 'upload-status ' + (state || '');
+            var txt = el.querySelector('.status-text');
+            if (txt) txt.textContent = text || 'AWAITING INPUT';
+        }
+    };
+
+    /* Detect file selection in #audio-upload (capture phase — fires before Gradio) */
+    document.addEventListener('change', function(e) {
+        var t = e.target;
+        if (t && t.tagName === 'INPUT' && t.type === 'file' && t.closest && t.closest('#audio-upload') && t.files && t.files.length > 0) {
+            window.__uploadStatus.set('uploading', 'UPLOADING...');
+        }
+    }, true);
+
+    /* Poll for <audio> element inside #audio-upload — upload/recording complete */
+    var __audioCheck = setInterval(function() {
+        var audio = document.querySelector('#audio-upload audio');
+        if (audio && audio.src && audio.src !== window.location.href && audio.readyState >= 2) {
+            window.__uploadStatus.set('complete', 'UPLOAD COMPLETE');
+        }
+    }, 600);
+
+    /* CLEAR button — reset status */
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.closest && e.target.closest('#btn-clear')) {
+            setTimeout(function() { window.__uploadStatus.set('', 'AWAITING INPUT'); }, 150);
+        }
+    });
+
+    /* Watch output terminal for processing completion */
+    var __termReady = setInterval(function() {
+        var term = document.getElementById('output-terminal');
+        if (!term) return;
+        clearInterval(__termReady);
+        var obs = new MutationObserver(function() {
+            var ta = term.querySelector('textarea');
+            if (ta && ta.value && ta.value.trim().length > 0
+                && ta.value.indexOf('Error') !== 0
+                && ta.value.indexOf('Please upload') !== 0) {
+                window.__uploadStatus.set('complete', 'PROCESSING COMPLETE');
+                setTimeout(function() { window.__uploadStatus.set('', 'AWAITING INPUT'); }, 3500);
+            }
+        });
+        obs.observe(term, { childList: true, subtree: true, characterData: true });
+    }, 300);
+    
+    return [];
+}
+"""
+
+
+def create_interface():
+    """Create brutalist-industrial Gradio interface"""
     
     with gr.Blocks(
-        title="AI Meeting Assistant",
-        theme=gr.themes.Soft(primary_hue="blue").set(
-            body_background_fill="*neutral_950",
-            body_background_fill_dark="*neutral_950",
-            background_fill_primary="*neutral_900",
-            background_fill_primary_dark="*neutral_900",
-            background_fill_secondary="*neutral_800",
-            background_fill_secondary_dark="*neutral_800"
-        ),
-        js=dark_theme_js
+        title="AI Meeting Assistant"
     ) as interface:
         
-        # Force dark theme CSS and add scrolling functionality
+        # ═══════════════════════════════════════════
+        # BRUTALIST INDUSTRIAL CSS SYSTEM
+        # ═══════════════════════════════════════════
         gr.HTML("""
-        <style>
-        body, html {
-            background-color: #0b0f19 !important;
-            color: #ffffff !important;
-            height: 100vh;
-            overflow-y: auto;
-            overflow-x: hidden;
-        }
-        .gradio-container {
-            background-color: #0b0f19 !important;
-            max-height: none !important;
-            height: auto !important;
-            overflow: visible !important;
-        }
-        .app {
-            max-height: none !important;
-            height: auto !important;
-        }
-        /* Enhanced scrolling for text areas */
-        .scroll {
-            overflow-y: auto !important;
-            max-height: 600px !important;
-        }
-        /* Ensure content can scroll */
-        .contain {
-            max-height: none !important;
-            height: auto !important;
-        }
-        /* Custom scrollbar styling for dark theme */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #1a1a1a;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #555;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #777;
-        }
-        </style>
-        <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #ffffff; font-size: 2.5em; margin-bottom: 10px;">AI Meeting Assistant</h1>
-            <p style="color: #cccccc; font-size: 1.1em; line-height: 1.4;">
-                Upload an audio file of a meeting. This tool will transcribe the audio, fix product-related terminology, and generate<br>
-                meeting minutes and with a list of tasks.
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* ═══ CSS VARIABLES ═══ */
+:root {
+    --bg: #0a0a0a;
+    --bg2: #111111;
+    --bg3: #1a1a1a;
+    --txt: #e8e6e3;
+    --txt2: #999999;
+    --txt3: #555555;
+    --acc: #ff6b35;
+    --acc2: #ff8c5a;
+    --acc-g: rgba(255,107,53,0.10);
+    --bdr: #2a2a2a;
+    --bdr2: #3a3a3a;
+    --fh: 'Bebas Neue', sans-serif;
+    --fm: 'JetBrains Mono', monospace;
+    --t: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ═══ BASE RESET ═══ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg);scroll-behavior:smooth;height:100%}
+body{
+    background:var(--bg);
+    color:var(--txt);
+    font-family:var(--fm);
+    font-weight:300;
+    font-size:13px;
+    line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+    min-height:100vh;
+}
+::selection{background:var(--acc);color:var(--bg)}
+
+/* ═══ ATMOSPHERE: GRID LINES ═══ */
+body::before{
+    content:'';
+    position:fixed;inset:0;
+    pointer-events:none;z-index:-1;
+    background:
+        linear-gradient(180deg,var(--bg) 0%,rgba(10,10,10,0.97) 30%,rgba(10,10,10,0.97) 70%,var(--bg) 100%),
+        linear-gradient(rgba(255,107,53,0.012) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(255,107,53,0.012) 1px,transparent 1px);
+    background-size:100% 100%,64px 64px,64px 64px;
+}
+
+/* ═══ SCROLLBAR ═══ */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--bdr2)}
+::-webkit-scrollbar-thumb:hover{background:var(--acc)}
+
+/* ═══ GRADIO CONTAINER OVERRIDES ═══ */
+.gradio-container{max-width:100%!important;padding:0!important;background:transparent!important;margin:0!important}
+.gradio-container .contain{max-width:1100px!important;margin:0 auto!important;padding:0 2.5rem!important}
+.gradio-container .app{background:transparent!important}
+.gradio-container .main{background:transparent!important}
+.gr-box,.gr-panel,.gr-form{background:transparent!important;border:none!important;box-shadow:none!important;border-radius:0!important}
+.prose{color:var(--txt)!important}
+.prose *{color:var(--txt)!important}
+
+/* Hide Gradio branding only (not our custom footer) */
+gradio-app footer:not(.brutal-footer),#footer,.built-with-gradio{display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important;opacity:0!important}
+
+/* ═══ GRADIO LABEL OVERRIDES ═══ */
+label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
+    font-family:var(--fh)!important;
+    font-weight:400!important;
+    text-transform:uppercase!important;
+    letter-spacing:0.12em!important;
+    color:var(--txt2)!important;
+    font-size:0.7rem!important;
+    margin-bottom:0.5rem!important;
+}
+
+/* ═══ HERO HEADER ═══ */
+.brutal-header{
+    text-align:center;
+    padding:3.5rem 2.5rem 1.5rem;
+    max-width:1100px;
+    margin:0 auto;
+    position:relative;
+}
+.header-rule{
+    width:100%;
+    height:1px;
+    margin:1.5rem 0;
+    background:linear-gradient(90deg,transparent,var(--bdr2) 15%,var(--bdr2) 85%,transparent);
+}
+.header-title{
+    font-family:var(--fh);
+    font-size:clamp(3.5rem,8.5vw,7rem);
+    color:var(--txt);
+    line-height:0.82;
+    letter-spacing:-0.03em;
+    text-transform:uppercase;
+    margin:0;
+    text-shadow:0 0 80px rgba(255,107,53,0.05);
+}
+.header-subtitle{
+    font-family:var(--fh);
+    font-size:clamp(0.75rem,1.4vw,0.9rem);
+    color:var(--acc);
+    letter-spacing:0.3em;
+    text-transform:uppercase;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:1rem;
+    margin:0.5rem 0;
+}
+.subtitle-dot{
+    display:inline-block;
+    width:5px;height:5px;
+    background:var(--acc);
+    animation:dotPulse 2s ease-in-out infinite;
+}
+.header-desc{
+    font-family:var(--fm);
+    font-size:0.75rem;
+    font-weight:300;
+    color:var(--txt3);
+    letter-spacing:0.05em;
+    line-height:1.8;
+    max-width:600px;
+    margin:0 auto;
+}
+.header-desc strong{color:var(--txt2);font-weight:500}
+
+/* ═══ MAIN CONTENT GRID ═══ */
+.main-content{
+    display:flex!important;
+    gap:0!important;
+    max-width:1100px!important;
+    margin:0 auto!important;
+    padding:0 2.5rem!important;
+    flex-wrap:wrap!important;
+}
+.main-content > .gr-column{padding:0!important}
+.content-panel{
+    padding:1.5rem!important;
+    position:relative!important;
+    border:1px solid var(--bdr)!important;
+    background:var(--bg2)!important;
+    min-height:420px!important;
+}
+.upload-panel{
+    flex:11!important;
+    min-width:300px!important;
+    border-right:none!important;
+}
+.output-panel{
+    flex:9!important;
+    min-width:280px!important;
+    display:flex!important;
+    flex-direction:column!important;
+}
+
+/* ═══ PANEL LABELS ═══ */
+.panel-label{
+    font-family:var(--fh);
+    font-size:0.8rem;
+    letter-spacing:0.2em;
+    color:var(--acc);
+    text-transform:uppercase;
+    margin-bottom:1.25rem;
+    padding-bottom:0.75rem;
+    border-bottom:1px solid var(--bdr);
+    display:flex;
+    align-items:center;
+    gap:0.5rem;
+}
+.panel-label-arrow{
+    color:var(--acc);
+    font-family:var(--fm);
+    font-size:0.7rem;
+    animation:arrowBlink 1.5s step-end infinite;
+}
+
+/* ═══ AUDIO UPLOAD ZONE ═══ */
+#audio-upload{
+    border:1px dashed var(--bdr)!important;
+    background:var(--bg3)!important;
+    padding:1.5rem!important;
+    transition:all var(--t)!important;
+    min-height:120px!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+}
+#audio-upload:hover{
+    border-color:var(--acc)!important;
+    background:rgba(255,107,53,0.03)!important;
+}
+#audio-upload audio{width:100%!important;border-radius:0!important}
+#audio-upload input[type="file"]{color:var(--txt)!important;font-family:var(--fm)!important}
+#audio-upload .audio-container{width:100%!important}
+
+/* Upload / Record source toggles (override global button padding) */
+#audio-upload .source-selection{
+    display:flex!important;
+    gap:0.5rem!important;
+    margin-top:0.75rem!important;
+    justify-content:center!important;
+}
+#audio-upload button.icon{
+    padding:0.4rem 0.85rem!important;
+    min-height:2rem!important;
+    height:auto!important;
+    width:auto!important;
+    display:inline-flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    gap:0.4rem!important;
+    font-family:var(--fm)!important;
+    font-size:0.65rem!important;
+    font-weight:400!important;
+    letter-spacing:0.1em!important;
+    text-transform:uppercase!important;
+    border-radius:0!important;
+    background:var(--bg)!important;
+    cursor:pointer!important;
+    transition:all var(--t)!important;
+    line-height:1!important;
+}
+#audio-upload button.icon svg{
+    width:14px!important;
+    height:14px!important;
+    flex-shrink:0!important;
+}
+#audio-upload button.icon.selected{
+    color:var(--acc)!important;
+    border-color:var(--acc)!important;
+    background:rgba(255,107,53,0.08)!important;
+}
+#audio-upload button.icon.selected svg,
+#audio-upload button.icon.selected svg *{stroke:var(--acc)!important}
+#audio-upload button.icon:not(.selected){
+    color:var(--txt2)!important;
+    border-color:var(--bdr2)!important;
+}
+#audio-upload button.icon:not(.selected) svg,
+#audio-upload button.icon:not(.selected) svg *{stroke:var(--txt2)!important}
+#audio-upload button.icon:not(.selected):hover{
+    color:var(--txt)!important;
+    border-color:var(--txt2)!important;
+}
+#audio-upload button[aria-label="Upload file"]::after{content:"UPLOAD"}
+#audio-upload button[aria-label="Record audio"]::after{content:"RECORD"}
+
+/* ═══ UPLOAD STATUS INDICATOR ═══ */
+.upload-status{
+    display:flex;
+    align-items:center;
+    gap:0.5rem;
+    padding:0.5rem 0.75rem;
+    margin-bottom:0.75rem;
+    background:var(--bg3);
+    border:1px solid var(--bdr);
+    font-family:var(--fm);
+    font-size:0.65rem;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--txt2);
+    transition:all var(--t);
+}
+.upload-status.uploading{
+    border-color:var(--acc);
+    color:var(--acc);
+    background:rgba(255,107,53,0.06);
+}
+.upload-status.processing{
+    border-color:var(--acc);
+    color:var(--acc);
+    background:rgba(255,107,53,0.08);
+}
+.upload-status.complete{
+    border-color:#22c55e;
+    color:#22c55e;
+    background:rgba(34,197,94,0.06);
+}
+.status-dot{
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:currentColor;
+    flex-shrink:0;
+    opacity:0.6;
+    transition:all var(--t);
+}
+.upload-status.uploading .status-dot,
+.upload-status.processing .status-dot{
+    opacity:1;
+    animation:statusPulse 0.8s ease-in-out infinite;
+}
+.upload-status.complete .status-dot{
+    opacity:1;
+    background:#22c55e;
+}
+@keyframes statusPulse{
+    0%,100%{transform:scale(1);opacity:1}
+    50%{transform:scale(1.6);opacity:0.4}
+}
+
+/* ═══ OUTPUT TERMINAL ═══ */
+#output-terminal{flex:1!important;display:flex!important;flex-direction:column!important}
+#output-terminal > div{flex:1!important}
+#output-terminal textarea{
+    width:100%!important;
+    min-height:380px!important;
+    height:100%!important;
+    background:var(--bg)!important;
+    color:var(--txt)!important;
+    font-family:var(--fm)!important;
+    font-size:12px!important;
+    font-weight:300!important;
+    line-height:1.8!important;
+    border:1px solid var(--bdr)!important;
+    border-radius:0!important;
+    padding:1.25rem!important;
+    resize:none!important;
+    outline:none!important;
+    transition:all var(--t)!important;
+    box-shadow:inset 0 0 40px rgba(0,0,0,0.4)!important;
+    caret-color:var(--acc)!important;
+    background-image:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px)!important;
+}
+#output-terminal textarea:focus{
+    border-color:var(--acc)!important;
+    box-shadow:inset 0 0 40px rgba(0,0,0,0.4),0 0 0 1px var(--acc-g)!important;
+}
+#output-terminal textarea::placeholder{color:var(--txt3)!important;font-style:italic}
+#output-terminal textarea.has-content{border-color:var(--bdr2)!important}
+
+/* ═══ BUTTONS ═══ */
+button,.gr-button{
+    font-family:var(--fh)!important;
+    font-size:0.9rem!important;
+    letter-spacing:0.15em!important;
+    text-transform:uppercase!important;
+    border-radius:0!important;
+    border:1px solid!important;
+    padding:0.7rem 1.8rem!important;
+    cursor:pointer!important;
+    transition:all 0.15s cubic-bezier(0.4,0,0.2,1)!important;
+    position:relative!important;
+    outline:none!important;
+}
+#btn-submit{
+    background:var(--acc)!important;
+    color:var(--bg)!important;
+    border-color:var(--acc)!important;
+    font-weight:400!important;
+}
+#btn-submit:hover{
+    background:transparent!important;
+    color:var(--acc)!important;
+    box-shadow:0 0 24px var(--acc-g)!important;
+}
+#btn-submit:active{transform:scale(0.96)!important;box-shadow:0 0 8px var(--acc-g)!important}
+#btn-clear{
+    background:transparent!important;
+    color:var(--txt2)!important;
+    border-color:var(--bdr2)!important;
+    font-weight:400!important;
+}
+#btn-clear:hover{color:var(--txt)!important;border-color:var(--txt2)!important}
+#btn-clear:active{transform:scale(0.96)!important}
+.button-row{display:flex!important;gap:0.75rem!important;margin-top:1rem!important}
+.button-row button{flex:1!important}
+
+/* ═══ EXAMPLES ═══ */
+.gr-examples{margin-top:1rem!important}
+.gr-examples .examples-title{
+    font-family:var(--fh)!important;
+    font-size:0.7rem!important;
+    letter-spacing:0.12em!important;
+    text-transform:uppercase!important;
+    color:var(--txt3)!important;
+    margin-bottom:0.5rem!important;
+}
+.gr-examples table{width:100%!important;border-collapse:collapse!important}
+.gr-examples td{padding:0!important}
+.gr-examples button{
+    width:100%!important;
+    background:var(--bg3)!important;
+    color:var(--txt2)!important;
+    border:1px solid var(--bdr)!important;
+    font-family:var(--fm)!important;
+    font-size:0.7rem!important;
+    font-weight:400!important;
+    text-transform:none!important;
+    letter-spacing:0.03em!important;
+    padding:0.6rem 1rem!important;
+    text-align:left!important;
+}
+.gr-examples button:hover{background:var(--bg)!important;color:var(--acc)!important;border-color:var(--acc)!important}
+
+/* ═══ FILE DOWNLOAD ═══ */
+#download-file{
+    margin-top:0.75rem!important;
+    border:1px solid var(--bdr)!important;
+    background:var(--bg3)!important;
+    padding:0.5rem!important;
+}
+#download-file .file-preview{font-family:var(--fm)!important;font-size:0.7rem!important;color:var(--txt2)!important}
+.download-section{
+    font-family:var(--fh);
+    font-size:0.7rem;
+    letter-spacing:0.15em;
+    color:var(--txt3);
+    text-transform:uppercase;
+    margin-top:1rem;
+    padding-top:0.75rem;
+    border-top:1px solid var(--bdr);
+    display:flex;
+    align-items:center;
+    gap:0.5rem;
+}
+
+/* ═══ FOOTER ═══ */
+.brutal-footer{text-align:center;padding:2.5rem 2.5rem 3rem;max-width:1100px;margin:0 auto}
+.footer-rule{
+    width:100%;
+    height:1px;
+    margin-bottom:1.5rem;
+    background:linear-gradient(90deg,transparent,var(--bdr) 30%,var(--bdr) 70%,transparent);
+}
+.footer-text{
+    font-family:var(--fm);
+    font-size:0.65rem;
+    color:var(--txt3);
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+}
+.footer-text span{color:var(--acc)}
+
+/* ═══ PROCESSING STATE ═══ */
+#btn-submit:disabled{opacity:0.5!important;cursor:not-allowed!important;animation:pulse 1.5s ease-in-out infinite!important}
+
+/* ═══ ANIMATIONS ═══ */
+@keyframes dotPulse{0%,100%{opacity:0.3;transform:scale(0.8)}50%{opacity:1;transform:scale(1.2)}}
+@keyframes arrowBlink{0%,100%{opacity:0.3}50%{opacity:1}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.6}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes terminalFlash{
+    0%{box-shadow:inset 0 0 40px rgba(0,0,0,0.4)}
+    50%{box-shadow:inset 0 0 40px rgba(0,0,0,0.4),inset 0 0 2px var(--acc)}
+    100%{box-shadow:inset 0 0 40px rgba(0,0,0,0.4)}
+}
+
+/* ═══ ENTRANCE ANIMATION (CSS-only; no JS required) ═══ */
+.stagger-in{
+    opacity:1;
+    animation:fadeInUp 0.6s cubic-bezier(0.4,0,0.2,1) both;
+    animation-delay:0.15s;
+}
+#output-terminal textarea.has-content{animation:terminalFlash 0.6s ease-out 1}
+body.loaded .header-title{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;animation-delay:0.1s}
+body.loaded .header-subtitle{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;animation-delay:0.2s}
+body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;animation-delay:0.3s}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width:768px){
+    .gradio-container .contain{padding:0 1rem!important}
+    .main-content{flex-direction:column!important;padding:0 1rem!important}
+    .upload-panel{border-right:1px solid var(--bdr)!important;border-bottom:none!important}
+    .brutal-header{padding:2rem 1rem 1rem}
+    .header-title{font-size:clamp(2rem,10vw,3.5rem)!important}
+    .content-panel{min-height:auto!important}
+    #output-terminal textarea{min-height:280px!important}
+    .brutal-footer{padding:2rem 1rem}
+}
+</style>
+""")
+        
+        # ═══════════════════════════════════════════
+        # HERO HEADER
+        # ═══════════════════════════════════════════
+        gr.HTML("""
+        <div class="brutal-header">
+            <div class="header-rule"></div>
+            <h1 class="header-title">MEETING<br>ASSISTANT</h1>
+            <div class="header-subtitle">
+                <span class="subtitle-dot"></span>
+                AI-POWERED ANALYSIS ENGINE
+                <span class="subtitle-dot"></span>
+            </div>
+            <div class="header-rule"></div>
+            <p class="header-desc">
+                UPLOAD MEETING AUDIO &mdash; RECEIVE <strong>TRANSCRIPTION</strong>,
+                <strong>SUMMARY</strong>, <strong>TASK LIST</strong>
+                &amp; <strong>SENTIMENT ANALYSIS</strong>
             </p>
         </div>
         """)
         
-        with gr.Row():
-            # Left column - Audio upload (matches the UI exactly)
-            with gr.Column(scale=1):
+        # ═══════════════════════════════════════════
+        # MAIN CONTENT
+        # ═══════════════════════════════════════════
+        with gr.Row(elem_classes=["main-content", "stagger-in"]):
+            with gr.Column(scale=11, elem_classes=["content-panel", "upload-panel"]):
+                gr.HTML("""<div class="panel-label"><span class="panel-label-arrow">&gt;</span> INPUT</div>""")
+                gr.HTML("""<div id="upload-status" class="upload-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">AWAITING INPUT</span>
+                </div>""")
+                
                 audio_input = gr.Audio(
-                    label="Upload your audio file",
+                    label="",
                     type="filepath",
-                    show_label=False
+                    show_label=False,
+                    elem_id="audio-upload"
                 )
                 
-                # Add sample audio example for testing
                 gr.Examples(
                     examples=[["sample_meeting.wav"]],
                     inputs=audio_input,
-                    label="📝 Try this sample meeting audio:",
+                    label="SAMPLE AUDIO",
                     examples_per_page=1
                 )
                 
-                with gr.Row():
-                    clear_btn = gr.Button("Clear", variant="secondary")
-                    submit_btn = gr.Button("Submit", variant="primary")
+                with gr.Row(elem_classes=["button-row"]):
+                    clear_btn = gr.Button("CLEAR", elem_id="btn-clear", variant="secondary", size="lg")
+                    submit_btn = gr.Button("PROCESS", elem_id="btn-submit", variant="primary", size="lg")
             
-            # Right column - Meeting Minutes and Tasks output with scrolling
-            with gr.Column(scale=1):
+            with gr.Column(scale=9, elem_classes=["content-panel", "output-panel"]):
+                gr.HTML("""<div class="panel-label"><span class="panel-label-arrow">&gt;</span> OUTPUT</div>""")
+                
                 output_display = gr.Textbox(
-                    label="Meeting Minutes and Tasks",
-                    lines=25,  # Increased lines for better content display
-                    max_lines=40,  # Allow expansion up to 40 lines
-                    show_label=True,
+                    label="",
+                    lines=22,
+                    max_lines=35,
+                    show_label=False,
                     interactive=False,
-                    placeholder="Your meeting minutes and task list will appear here after processing...",
-                    elem_classes=["scroll"]  # Add scroll class for enhanced scrolling
+                    placeholder="AWAITING INPUT...",
+                    elem_id="output-terminal"
                 )
                 
-                # Download section (matches the UI)
-                gr.Markdown("### Download the Generated Meeting Minutes and Tasks")
+                gr.HTML("""<div class="download-section">
+                    <span class="panel-label-arrow">&gt;</span> EXPORT
+                </div>""")
                 
-                # Create download file
                 download_file = gr.File(
-                    label="meeting_minutes_and_tasks.txt",
+                    label="",
+                    elem_id="download-file",
                     visible=True,
                     interactive=False
                 )
         
-        # Wire up the event handlers
+        # ═══════════════════════════════════════════
+        # EVENT HANDLERS
+        # ═══════════════════════════════════════════
         submit_btn.click(
             fn=process_meeting_audio,
             inputs=[audio_input],
-            outputs=[output_display, download_file]
+            outputs=[output_display, download_file],
+            js="""
+            function() {
+                var audioEl = document.querySelector('#audio-upload audio');
+                var hasAudio = audioEl && audioEl.src && audioEl.src !== window.location.href;
+                if (hasAudio && window.__uploadStatus) {
+                    window.__uploadStatus.set('processing', 'PROCESSING...');
+                }
+                return [];
+            }
+            """
         )
         
         clear_btn.click(
@@ -812,19 +1382,18 @@ def create_interface():
             outputs=[audio_input, output_display, download_file]
         )
         
-        # Footer with enhanced info
+        # ═══════════════════════════════════════════
+        # FOOTER
+        # ═══════════════════════════════════════════
         gr.HTML("""
-        <div style="text-align: center; margin-top: 30px; padding: 20px; background-color: #1a1a1a; border-radius: 8px; border: 1px solid #444;">
-            <h3 style="color: #ffffff;">🚀 About This AI Meeting Assistant</h3>
-            <p style="color: #cccccc; margin: 10px 0;">
-                This tool uses advanced <strong>ChatPromptTemplate chains</strong> and <strong>lazy loading optimization</strong> for ultra-fast processing.<br>
-                <strong>Speed Features:</strong> Whisper-tiny (10x faster), DistilBART (6x faster), Enhanced task extraction with LangChain prompts<br>
-                <strong>Models:</strong> All open-source and free - Whisper, BART, RoBERTa, LangChain ChatPromptTemplate
+        <footer class="brutal-footer">
+            <div class="footer-rule"></div>
+            <p class="footer-text">
+                MODELS: <span>WHISPER</span> &middot; <span>BART</span> &middot; <span>ROBERTA</span> &middot; <span>LANGCHAIN</span>
+                &nbsp;&mdash;&nbsp;
+                CREATED BY <span>POUYADEVA1</span> &middot; OPEN SOURCE &middot; MIT LICENSE
             </p>
-            <p style="color: #888; font-size: 0.9em;">
-                Created by <strong>PouyaDevA1</strong> | Enhanced with advanced prompt engineering | Ultra-fast lazy loading architecture
-            </p>
-        </div>
+        </footer>
         """)
     
     return interface
@@ -842,5 +1411,8 @@ demo.launch(
     show_error=True,
     quiet=False,
     favicon_path=None,
+    theme=gr.themes.Base(),
+    js=custom_js,
+    footer_links=[],
     app_kwargs={"docs_url": None, "redoc_url": None}
 )
