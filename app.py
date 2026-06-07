@@ -633,7 +633,9 @@ def create_interface():
     """Create brutalist-industrial Gradio interface"""
     
     with gr.Blocks(
-        title="AI Meeting Assistant"
+        title="AI Meeting Assistant",
+        theme=gr.themes.Base(),
+        js=custom_js
     ) as interface:
         
         # ═══════════════════════════════════════════
@@ -1246,8 +1248,6 @@ demo.launch(
     show_error=True,
     quiet=False,
     favicon_path=None,
-    theme=gr.themes.Base(),
-    js=custom_js,
     footer_links=[],
     app_kwargs={"docs_url": None, "redoc_url": None}
 )
