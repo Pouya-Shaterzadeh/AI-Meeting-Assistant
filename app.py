@@ -1245,10 +1245,5 @@ demo.js = custom_js
 demo.launch(
     server_name="0.0.0.0",
     server_port=7860,
-    inbrowser=False,
     show_error=True,
-    quiet=False,
-    favicon_path=None,
-    footer_links=[],
-    app_kwargs={"docs_url": None, "redoc_url": None}
 )
