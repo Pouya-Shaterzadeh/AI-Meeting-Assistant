@@ -633,9 +633,7 @@ def create_interface():
     """Create brutalist-industrial Gradio interface"""
     
     with gr.Blocks(
-        title="AI Meeting Assistant",
-        theme=gr.themes.Base(),
-        js=custom_js
+        title="AI Meeting Assistant"
     ) as interface:
         
         # ═══════════════════════════════════════════
@@ -1241,6 +1239,9 @@ meeting_assistant = MeetingAssistant()
 
 # Initialize and launch with speed optimizations
 demo = create_interface()
+# Set theme and js as attributes (Gradio 5+ compat — also set in Blocks() ctor)
+demo.theme = gr.themes.Base()
+demo.js = custom_js
 demo.launch(
     server_name="0.0.0.0",
     server_port=7860,
