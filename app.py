@@ -1206,7 +1206,6 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
                 if (hasAudio && window.__uploadStatus) {
                     window.__uploadStatus.set('processing', 'PROCESSING...');
                 }
-                return [];
             }
             """
         )
