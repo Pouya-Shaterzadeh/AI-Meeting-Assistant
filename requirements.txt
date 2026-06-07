@@ -1,39 +1,20 @@
-# Ultra-Fast AI Meeting Assistant Dependencies
+# AI Meeting Assistant — HF Inference API (Serverless)
 gradio==4.44.1
 starlette>=0.27.0,<0.38.0
 jinja2>=3.1.2,<3.2.0
 
-# Core AI Models (optimized for speed)
-torch>=2.0.0
-torchaudio>=2.0.0
-transformers>=4.35.0
-openai-whisper>=20231117
+# HF Inference API client
+huggingface-hub>=0.23.5
 
-# LangChain for ChatPromptTemplate chains
+# LangChain — prompt templates only (no model loading)
 langchain>=0.1.0
 langchain-core>=0.1.0
-langchain-text-splitters>=0.0.1
-langchain-community>=0.0.10
-
-# Model acceleration and optimization
-accelerate>=0.24.0
-optimum>=1.12.0
 
 # Audio processing
 librosa>=0.10.0
 soundfile>=0.12.0
 ffmpeg-python>=0.2.0
 
-# Text processing and tokenization
-sentencepiece>=0.1.99
-protobuf>=3.20.0
-tokenizers>=0.15.0
-sacremoses>=0.0.53
-
 # Scientific computing
 numpy>=1.24.0
 scipy>=1.11.0
-
-# Model hub and datasets
-huggingface-hub==0.23.5
-datasets>=2.14.0

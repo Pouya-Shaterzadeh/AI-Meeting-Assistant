@@ -32,31 +32,15 @@ _gc_utils._json_schema_to_python_type = _safe_json_schema_to_python_type_priv
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Try to import optional dependencies with graceful fallbacks
-try:
-    import whisper
-    WHISPER_AVAILABLE = True
-    logger.info("✅ Whisper loaded successfully")
-except ImportError:
-    WHISPER_AVAILABLE = False
-    logger.warning("⚠️ Whisper not available - audio transcription will be disabled")
+# Hugging Face Inference API client (serverless — no local models)
+from huggingface_hub import InferenceClient
 
-try:
-    import torch
-    from transformers import pipeline
-    TRANSFORMERS_AVAILABLE = True
-    logger.info("✅ Transformers loaded successfully")
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-    logger.warning("⚠️ Transformers not available - using fallback methods")
-
+# Optional: LangChain prompt templates (lightweight, no model loading)
 try:
     try:
-        from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from langchain_core.prompts import ChatPromptTemplate
     except ImportError:
-        from langchain.prompts import ChatPromptTemplate, PromptTemplate
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain.prompts import ChatPromptTemplate
     LANGCHAIN_AVAILABLE = True
     logger.info("✅ LangChain loaded successfully")
 except ImportError:
@@ -64,28 +48,31 @@ except ImportError:
     logger.warning("⚠️ LangChain not available - using simple text processing")
 
 class MeetingAssistant:
+    """AI Meeting Assistant powered by Hugging Face Inference API (serverless)"""
+
+    # Model IDs — best-in-class serverless models
+    ASR_MODEL = "openai/whisper-large-v3-turbo"
+    SUM_MODEL = "facebook/bart-large-cnn"
+    SENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+    LLM_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+
     def __init__(self):
-        """Initialize with ultra-fast lazy loading for instant startup"""
-        # Model placeholders - loaded only when needed
-        self.whisper_model = None
-        self.summarizer = None
-        self.sentiment_analyzer = None
-        
-        # Loading flags to prevent redundant loading
-        self._whisper_loaded = False
-        self._summarizer_loaded = False
-        self._sentiment_loaded = False
-        
-        # Initialize LangChain ChatPromptTemplate chains
+        """Initialize HF Inference client and prompt templates"""
+        self.hf_token = os.environ.get("HF_TOKEN")
+        if not self.hf_token:
+            logger.warning("⚠️ HF_TOKEN not set — Inference API calls will fail")
+            self.client = None
+        else:
+            self.client = InferenceClient(token=self.hf_token)
+            logger.info("✅ HF Inference API client initialized")
+
+        # Initialize LangChain ChatPromptTemplate for task extraction
         self._init_langchain_chains()
-        
-        # CPU optimizations
-        if TRANSFORMERS_AVAILABLE:
-            torch.set_num_threads(4)
-            os.environ['OMP_NUM_THREADS'] = '4'
-            os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-        
-        logger.info("🚀 AI Meeting Assistant initialized with ultra-fast lazy loading")
+
+        # Token budget for LLM task extraction
+        self._llm_max_tokens = 600
+
+        logger.info("🚀 AI Meeting Assistant initialized (serverless — HF Inference API)")
     
     def _init_langchain_chains(self):
         """Initialize advanced ChatPromptTemplate chains following documentation"""
@@ -140,287 +127,141 @@ class MeetingAssistant:
         except Exception as e:
             logger.error(f"Error initializing LangChain chains: {e}")
     
-    def _load_whisper_model(self):
-        """Load Whisper model only when needed for transcription"""
-        if self._whisper_loaded or not WHISPER_AVAILABLE:
-            return
-        
-        try:
-            logger.info("⚡ Loading Whisper model (on-demand)...")
-            # Use tiny model for maximum speed (10x faster than medium)
-            self.whisper_model = whisper.load_model("tiny")
-            self._whisper_loaded = True
-            logger.info("✅ Whisper tiny model loaded (ultra-fast)")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper: {e}")
-    
-    def _load_summarizer(self):
-        """Load summarizer model only when needed"""
-        if self._summarizer_loaded or not TRANSFORMERS_AVAILABLE:
-            return
-        
-        try:
-            logger.info("⚡ Loading summarization model (on-demand)...")
-            # Use fastest available model
-            self.summarizer = pipeline(
-                "summarization", 
-                model="sshleifer/distilbart-cnn-6-6",  # Fastest BART variant
-                device=-1,
-                torch_dtype=torch.float32
-            )
-            self._summarizer_loaded = True
-            logger.info("✅ Fast summarization model loaded")
-        except Exception as e:
-            logger.warning(f"Could not load summarizer: {e}")
-    
-    def _load_sentiment_analyzer(self):
-        """Load sentiment analyzer only when needed"""
-        if self._sentiment_loaded or not TRANSFORMERS_AVAILABLE:
-            return
-        
-        try:
-            logger.info("⚡ Loading sentiment model (on-demand)...")
-            self.sentiment_analyzer = pipeline(
-                "sentiment-analysis",
-                model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-                device=-1,
-                return_all_scores=False  # Faster single prediction
-            )
-            self._sentiment_loaded = True
-            logger.info("✅ Sentiment analysis model loaded")
-        except Exception as e:
-            logger.warning(f"Could not load sentiment analyzer: {e}")
     
     def transcribe_audio(self, audio_path):
-        """Ultra-fast transcribe audio with lazy loading and speed optimizations"""
+        """Transcribe audio via HF Inference API (whisper-large-v3-turbo)"""
         try:
             if audio_path is None:
                 return "Please upload an audio file.", []
-            
-            if not WHISPER_AVAILABLE:
-                return "Audio transcription is currently unavailable. Please try the Text Analysis tab to analyze meeting notes directly.", []
-            
-            # Lazy load Whisper model only when needed
-            self._load_whisper_model()
-            
-            if self.whisper_model is None:
-                return "Failed to load Whisper model.", []
-            
-            logger.info("⚡ Starting ultra-fast audio transcription...")
-            
-            # Speed optimizations for Whisper
-            result = self.whisper_model.transcribe(
-                audio_path,
-                fp16=False,  # CPU compatibility
-                language=None,  # Auto-detect (faster)
-                task="transcribe",
-                beam_size=1,  # Fastest beam search
-                best_of=1,  # Single pass
-                temperature=0.0,  # Deterministic (faster)
-                compression_ratio_threshold=2.4,
-                logprob_threshold=-1.0,
-                no_speech_threshold=0.6
+
+            if not self.client:
+                return "HF_TOKEN not configured. Set your Hugging Face read token in the Space settings.", []
+
+            logger.info("⚡ Transcribing via HF Inference API (whisper-large-v3-turbo)...")
+
+            with open(audio_path, "rb") as f:
+                audio_bytes = f.read()
+
+            result = self.client.automatic_speech_recognition(
+                audio_bytes,
+                model=self.ASR_MODEL
             )
-            
-            transcription = result["text"]
-            
-            logger.info("✅ Ultra-fast transcription completed")
+            transcription = result.get("text", "")
+
+            if not transcription:
+                return "No speech detected in the audio file.", []
+
+            logger.info("✅ Transcription completed via HF Inference API")
             return transcription, []
-            
+
         except Exception as e:
             logger.error(f"Error transcribing audio: {str(e)}")
             return f"Error transcribing audio: {str(e)}", []
     
     def extract_action_items(self, text):
-        """Extract action items using advanced ChatPromptTemplate chains (following documentation)"""
+        """Extract action items via LLM (Mistral-7B) or fall back to regex"""
         try:
-            # First try advanced ChatPromptTemplate approach if LangChain is available
-            if LANGCHAIN_AVAILABLE and hasattr(self, 'task_extraction_template'):
-                try:
-                    # Format the prompt with meeting text
-                    formatted_prompt = self.task_extraction_template.format_messages(
-                        meeting_text=text[:2000]  # Limit text for processing speed
-                    )
-                    
-                    # Simulate LLM processing with enhanced pattern matching guided by prompt structure
-                    return self._extract_tasks_with_enhanced_patterns(text, use_langchain_guidance=True)
-                    
-                except Exception as e:
-                    logger.warning(f"ChatPromptTemplate processing failed, using fallback: {e}")
-            
-            # Fallback to enhanced pattern matching
-            return self._extract_tasks_with_enhanced_patterns(text, use_langchain_guidance=False)
-            
+            if self.client:
+                return self._extract_tasks_with_llm(text)
+            else:
+                return self._extract_tasks_fallback(text)
         except Exception as e:
             logger.error(f"Error extracting action items: {str(e)}")
-            return "• Error analyzing text for action items"
-    
-    def _extract_tasks_with_enhanced_patterns(self, text, use_langchain_guidance=False):
-        """Comprehensive task extraction with detailed coverage and multiple categories"""
+            return self._extract_tasks_fallback(text)
+
+    def _extract_tasks_with_llm(self, text):
+        """Use Mistral-7B to extract structured action items from transcript"""
         try:
-            # Comprehensive patterns for detailed task extraction
-            if use_langchain_guidance:
-                # Extensive patterns when LangChain guidance is available
-                task_patterns = [
-                    # Explicit assignments with names and roles
-                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:\s+(?:from|in)\s+[A-Za-z\s]+)?)[\s,]*(?:will|should|needs? to|has to|must|is responsible for|assigned to)\s+([^.!?]{8,120})',
-                    # Action items with deadlines and contexts
-                    r'(?:action item|task|todo|follow[- ]?up|deliverable|milestone)\s*[:]?\s*([^.!?]{8,150})(?:\s+(?:by|before|due|until|deadline|target date)\s+([^.!?]+))?',
-                    # Commitments and agreements
-                    r'(?:commit(?:ted)?|promise[ds]?|agree[ds]?|decided?|resolved?)\s+(?:to\s+)?([^.!?]{8,100})',
-                    # Next steps and implementation plans
-                    r'(?:next step|implementation|plan|strategy|approach|initiative|project)\s*[:]?\s*([^.!?]{8,150})',
-                    # Review and approval workflows
-                    r'(?:review|approve|check|verify|validate|audit|assess|evaluate|examine)\s+([^.!?]{8,100})(?:\s+(?:by|before|with|from)\s+([^.!?]+))?',
-                    # Communication and coordination tasks
-                    r'(?:send|email|call|contact|reach out|inform|notify|communicate|coordinate|schedule|arrange|organize)\s+([^.!?]{8,100})',
-                    # Time-bound actions and deadlines
-                    r'(?:by|before|due|until|deadline|target)\s+(\w+day|next week|\d+[/\-]\d+|tomorrow|this week|end of|Q\d)\s*[:]?\s*([^.!?]{8,100})',
-                    # Research and analysis tasks
-                    r'(?:research|analyze|investigate|study|explore|examine|look into)\s+([^.!?]{8,100})',
-                    # Creation and development tasks
-                    r'(?:create|develop|build|design|write|prepare|draft|produce|generate)\s+([^.!?]{8,100})',
-                    # Meeting and discussion items
-                    r'(?:meet|discuss|present|report|update|brief|sync)\s+(?:with|about|on)?\s*([^.!?]{8,100})',
-                    # Process and workflow tasks
-                    r'(?:process|handle|manage|coordinate|execute|implement|deploy)\s+([^.!?]{8,100})',
-                    # Training and development
-                    r'(?:train|teach|learn|study|improve|develop|enhance)\s+([^.!?]{8,100})'
+            if LANGCHAIN_AVAILABLE and hasattr(self, 'task_extraction_template'):
+                messages = self.task_extraction_template.format_messages(
+                    meeting_text=text[:4000]
+                )
+                # Convert LangChain messages to dicts for InferenceClient
+                api_messages = [
+                    {"role": "system" if m.type == "system" else "user", "content": m.content}
+                    for m in messages
                 ]
             else:
-                # Comprehensive patterns for fallback
-                task_patterns = [
-                    r'(?:action item|task|todo|assignment)\s*[:]?\s*([^.!?]{8,100})',
-                    r'(?:need to|should|must|have to|required to)\s+([^.!?]{8,100})',
-                    r'([A-Z]\w+(?:\s+[A-Z]\w+)?)\s+(?:will|should|needs to)\s+([^.!?]{8,100})',
-                    r'(?:by|before|due)\s+\w+day\s*[:]?\s*([^.!?]{8,100})',
-                    r'(?:complete|finish|send|create|prepare|review|schedule|plan|update|check)\s+([^.!?]{8,100})',
-                    r'(?:follow up|reach out|contact|coordinate)\s+([^.!?]{8,100})'
+                api_messages = [
+                    {"role": "system", "content": "You are an expert meeting analyst. Extract actionable tasks with clear ownership, deadlines, and specifics. Format each task as a bullet point starting with '•'. Include WHO, WHAT, and WHEN for each task."},
+                    {"role": "user", "content": f"Extract ALL actionable tasks from this meeting transcript:\n\n{text[:4000]}\n\nEXTRACTED TASKS:"}
                 ]
-            
+
+            logger.info("⚡ Extracting action items via Mistral-7B...")
+            response = self.client.chat_completion(
+                messages=api_messages,
+                model=self.LLM_MODEL,
+                max_tokens=self._llm_max_tokens,
+                temperature=0.2
+            )
+            content = response["choices"][0]["message"]["content"]
+            logger.info("✅ LLM task extraction completed")
+            return content.strip()
+
+        except Exception as e:
+            logger.warning(f"LLM task extraction failed, falling back to regex: {e}")
+            return self._extract_tasks_fallback(text)
+
+    def _extract_tasks_fallback(self, text):
+        """Regex-based task extraction fallback when API is unavailable"""
+        try:
+            task_patterns = [
+                r'(?:action item|task|todo|assignment)\s*[:]?\s*([^.!?]{8,120})',
+                r'(?:need to|should|must|have to|required to)\s+([^.!?]{8,120})',
+                r'([A-Z]\w+(?:\s+[A-Z]\w+)?)\s+(?:will|should|needs to)\s+([^.!?]{8,120})',
+                r'(?:by|before|due)\s+\w+day\s*[:]?\s*([^.!?]{8,120})',
+                r'(?:complete|finish|send|create|prepare|review|schedule|plan|update|check)\s+([^.!?]{8,120})',
+                r'(?:follow up|reach out|contact|coordinate)\s+([^.!?]{8,120})',
+            ]
             tasks = []
-            # Process more text for comprehensive coverage
-            processed_text = text[:3000] if len(text) > 3000 else text
-            
-            # Process patterns with enhanced extraction
+            processed_text = text[:3000]
             for pattern in task_patterns:
                 matches = re.finditer(pattern, processed_text, re.IGNORECASE)
                 for match in matches:
                     groups = match.groups()
-                    
                     if len(groups) >= 2 and groups[0] and groups[1]:
-                        # Name + action + optional deadline/context
                         person = groups[0].strip()
                         action = groups[1].strip()
-                        context = groups[2].strip() if len(groups) > 2 and groups[2] else None
-                        
-                        if context:
-                            task = f"• {person}: {action} ({context})"
-                        else:
-                            task = f"• {person}: {action}"
+                        task = f"• {person}: {action}"
                     elif len(groups) >= 1 and groups[0]:
-                        # Just action with enhanced formatting
-                        action = groups[0].strip()
-                        # Clean up the action text
-                        action = re.sub(r'^(to\s+|the\s+)', '', action, flags=re.IGNORECASE)
+                        action = re.sub(r'^(to\s+|the\s+)', '', groups[0].strip(), flags=re.IGNORECASE)
                         task = f"• {action.capitalize()}"
                     else:
                         continue
-                    
-                    # Enhanced quality checks
-                    if (len(task) > 10 and len(task) < 200 and 
-                        task not in tasks and
-                        not any(word in task.lower() for word in ['said', 'mentioned', 'discussed', 'talked about'])):
+                    if len(task) > 10 and len(task) < 200 and task not in tasks:
                         tasks.append(task)
-                    
-                    if len(tasks) >= 15:  # Increased limit for more comprehensive coverage
+                    if len(tasks) >= 15:
                         break
-                
                 if len(tasks) >= 15:
                     break
-            
-            # Enhanced secondary patterns for more coverage
-            if len(tasks) < 5:
-                extended_patterns = [
-                    r'(complete|finish|send|create|prepare|review|schedule|plan|update|check|coordinate|manage|handle|process|implement|deploy|develop|design|write|draft|research|analyze|investigate|meet|discuss|present|report|brief|train|learn|improve)\s+([^.!?]{8,80})',
-                    r'(follow up|reach out|set up|sign up|clean up|wrap up|catch up|pick up|get back)\s+([^.!?]{8,80})',
-                    r'(work on|focus on|look at|think about|decide on)\s+([^.!?]{8,80})',
-                    r'(?:we|team|I|they)\s+(?:will|should|need to|have to|must)\s+([^.!?]{8,100})',
-                    r'(?:responsible for|in charge of|handling|managing)\s+([^.!?]{8,100})'
-                ]
-                
-                for pattern in extended_patterns:
-                    matches = re.finditer(pattern, processed_text, re.IGNORECASE)
-                    for match in matches:
-                        if len(match.groups()) >= 2:
-                            verb = match.group(1).strip()
-                            action = match.group(2).strip()
-                            task = f"• {verb.capitalize()} {action}"
-                        else:
-                            action = match.group(1).strip()
-                            task = f"• {action.capitalize()}"
-                        
-                        if (task not in tasks and len(task) > 10 and len(task) < 200 and
-                            not any(word in task.lower() for word in ['said', 'mentioned', 'discussed'])):
-                            tasks.append(task)
-                        if len(tasks) >= 12:
-                            break
-            
-            # If still insufficient tasks, extract from sentence structure
-            if len(tasks) < 3:
-                sentences = re.split(r'[.!?]+', processed_text)
-                for sentence in sentences[:30]:
-                    sentence = sentence.strip()
-                    if len(sentence) > 20:
-                        # Look for imperative or future tense structures
-                        if (re.search(r'\b(will|shall|going to|need to|have to|must|should)\b', sentence, re.IGNORECASE) or
-                            re.search(r'^(let\'s|we should|team will|plan to)', sentence, re.IGNORECASE)):
-                            
-                            # Clean and format as task
-                            clean_sentence = re.sub(r'^(so|and|but|also|then)\s+', '', sentence, flags=re.IGNORECASE)
-                            task = f"• {clean_sentence.capitalize()}"
-                            
-                            if (task not in tasks and len(task) > 15 and len(task) < 200):
-                                tasks.append(task)
-                                if len(tasks) >= 8:
-                                    break
-            
-            # Return comprehensive results
             if not tasks:
-                return "• No specific action items or tasks identified in the meeting discussion\n• Consider reviewing the meeting content for implicit action items or follow-ups"
-            
+                return "• No specific action items identified in the transcript"
             return "\n".join(tasks)
-            
         except Exception as e:
-            logger.error(f"Error in comprehensive task extraction: {e}")
-            return "• Error extracting tasks from meeting content\n• Please review the meeting transcript manually for action items"
+            logger.error(f"Error in fallback task extraction: {e}")
+            return "• Error extracting tasks from meeting content"
     
     def summarize_text(self, text):
-        """Comprehensive summarization with detailed coverage"""
+        """Summarize via HF Inference API (bart-large-cnn) or fallback"""
         try:
-            # Lazy load summarizer only when needed
-            if TRANSFORMERS_AVAILABLE:
-                self._load_summarizer()
-            
-            if self.summarizer and len(text) > 100:
-                # Use longer text sample for more comprehensive summary
-                text_sample = text[:2000]  # Increased for better coverage
-                summary = self.summarizer(
-                    text_sample,
-                    max_length=200,  # Longer for more details
-                    min_length=80,   # Ensure substantial content
-                    do_sample=False,
-                    num_beams=2      # Better quality
-                )[0]['summary_text']
-                
-                # Enhance with detailed fallback to ensure comprehensive coverage
-                detailed_summary = self.enhanced_fallback_summary(text)
-                return f"{summary}\n\n{detailed_summary}"
-            else:
+            if not self.client:
                 return self.enhanced_fallback_summary(text)
-        
+
+            if len(text) < 100:
+                return self.enhanced_fallback_summary(text)
+
+            logger.info("⚡ Summarizing via HF Inference API (bart-large-cnn)...")
+            result = self.client.summarization(
+                text,
+                model=self.SUM_MODEL,
+                parameters={"max_length": 200, "min_length": 80, "do_sample": False}
+            )
+            summary = result.get("summary_text", "")
+            logger.info("✅ Summarization completed via API")
+            return summary
+
         except Exception as e:
-            logger.error(f"Error in summarization: {str(e)}")
+            logger.warning(f"API summarization failed, falling back: {e}")
             return self.enhanced_fallback_summary(text)
     
     def enhanced_fallback_summary(self, text):
@@ -494,40 +335,35 @@ class MeetingAssistant:
         return self.enhanced_fallback_summary(text)
     
     def analyze_sentiment(self, text):
-        """Ultra-fast sentiment analysis with lazy loading"""
+        """Analyze sentiment via HF Inference API (roberta-base-sentiment) on full transcript"""
         try:
-            # Lazy load sentiment analyzer only when needed
-            if TRANSFORMERS_AVAILABLE:
-                self._load_sentiment_analyzer()
-            
-            if self.sentiment_analyzer and len(text) > 20:
-                # Speed optimized sentiment analysis
-                sample_text = text[:300]  # Smaller sample for speed
-                result = self.sentiment_analyzer(sample_text)
-                
-                if isinstance(result, list) and len(result) > 0:
-                    sentiment = result[0]
-                    label = sentiment.get('label', 'UNKNOWN').upper()
-                    score = sentiment.get('score', 0)
-                    
-                    # Quick label mapping
-                    label_mapping = {
-                        'POSITIVE': 'Positive', 'NEGATIVE': 'Negative', 'NEUTRAL': 'Neutral',
-                        'LABEL_0': 'Negative', 'LABEL_1': 'Neutral', 'LABEL_2': 'Positive'
-                    }
-                    
-                    mapped_label = label_mapping.get(label, label.title())
-                    confidence_percent = f"{score * 100:.1f}%"
-                    
-                    return f"Overall Sentiment: {mapped_label} (Confidence: {confidence_percent})"
-                else:
-                    return "Sentiment: Unable to determine from analysis"
+            if not self.client:
+                return self.fallback_sentiment_analysis(text)
+
+            if len(text) < 20:
+                return self.fallback_sentiment_analysis(text)
+
+            logger.info("⚡ Analyzing sentiment via HF Inference API (full transcript)...")
+            result = self.client.text_classification(
+                text,
+                model=self.SENT_MODEL
+            )
+            if isinstance(result, list) and len(result) > 0:
+                sentiment = result[0]
+                label = sentiment.get("label", "UNKNOWN").upper()
+                score = sentiment.get("score", 0)
+                label_map = {
+                    "POSITIVE": "Positive", "NEGATIVE": "Negative", "NEUTRAL": "Neutral",
+                    "LABEL_0": "Negative", "LABEL_1": "Neutral", "LABEL_2": "Positive",
+                }
+                mapped = label_map.get(label, label.title())
+                return f"Overall Sentiment: {mapped} (Confidence: {score * 100:.1f}%)"
             else:
                 return self.fallback_sentiment_analysis(text)
-        
+
         except Exception as e:
-            logger.error(f"Error analyzing sentiment: {str(e)}")
-            return "Sentiment: Analysis unavailable"
+            logger.warning(f"API sentiment failed, falling back: {e}")
+            return self.fallback_sentiment_analysis(text)
     
     def fallback_sentiment_analysis(self, text):
         """Simple sentiment analysis without AI models"""
@@ -585,29 +421,28 @@ class MeetingAssistant:
             return "• Error analyzing topics"
     
     def process_meeting_simple(self, audio_file):
-        """Ultra-fast meeting processing with timing and lazy loading"""
+        """Process meeting audio via HF Inference API (serverless pipeline)"""
         if audio_file is None:
             return "", None
         
         start_time = time.time()
         
         try:
-            logger.info("🚀 Starting ultra-fast meeting processing...")
+            logger.info("🚀 Starting meeting processing via HF Inference API...")
             
-            # Step 1: Transcription (lazy loaded)
+            # Step 1: Transcription (whisper-large-v3-turbo via API)
             transcription, _ = self.transcribe_audio(audio_file)
-            if transcription.startswith("Error") or "unavailable" in transcription:
+            if transcription.startswith("Error") or transcription.startswith("HF_TOKEN") or "unavailable" in transcription:
                 return transcription, None
             
             transcript_time = time.time() - start_time
             logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
             
-            # Step 2: Analysis with lazy loading
+            # Step 2: Analysis (all via API, fallback to local methods on failure)
             analysis_start = time.time()
             
-            # Generate analysis using advanced ChatPromptTemplate chains
             summary = self.summarize_text(transcription)
-            action_items = self.extract_action_items(transcription)  # Now uses ChatPromptTemplate
+            action_items = self.extract_action_items(transcription)
             sentiment = self.analyze_sentiment(transcription)
             key_topics = self.identify_key_topics(transcription)
             
@@ -626,7 +461,7 @@ class MeetingAssistant:
             temp_file.write(meeting_minutes)
             temp_file.close()
             
-            logger.info(f"✅ Ultra-fast processing completed in {total_time:.2f} seconds")
+            logger.info(f"✅ Processing completed in {total_time:.2f}s (serverless)")
             return meeting_minutes, temp_file.name
             
         except Exception as e:
