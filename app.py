@@ -1223,7 +1223,7 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
                 )
                 
                 gr.Examples(
-                    examples=[[os.path.abspath("sample_meeting.wav")]],
+                    examples=[[_demo_audio_path]],
                     inputs=audio_input,
                     label="SAMPLE AUDIO",
                     examples_per_page=1
@@ -1358,7 +1358,7 @@ def _generate_synthetic_audio(path):
 
 
 # Ensure demo audio exists before initializing the assistant
-_generate_demo_audio()
+_demo_audio_path = _generate_demo_audio()
 
 # Initialize the meeting assistant
 meeting_assistant = MeetingAssistant()
