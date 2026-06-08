@@ -51,11 +51,11 @@ except ImportError:
 class MeetingAssistant:
     """AI Meeting Assistant powered by Hugging Face Inference API (serverless)"""
 
-    # Model IDs — best-in-class serverless models
+    # Model IDs — optimized for meeting analysis
     ASR_MODEL = "openai/whisper-large-v3-turbo"
-    SUM_MODEL = "facebook/bart-large-cnn"
-    SENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
-    LLM_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+    SUM_MODEL = "philschmid/bart-large-cnn-samsum"
+    SENT_MODEL = "j-hartmann/emotion-english-distilroberta-base"
+    LLM_MODEL = "microsoft/Phi-3-mini-4k-instruct"
 
     def __init__(self):
         """Initialize HF Inference client and prompt templates"""
@@ -160,7 +160,7 @@ class MeetingAssistant:
             return f"Error transcribing audio: {str(e)}", []
     
     def extract_action_items(self, text):
-        """Extract action items via LLM (Mistral-7B) or fall back to regex"""
+        """Extract action items via LLM (Phi-3-mini) or fall back to regex"""
         try:
             if self.client:
                 return self._extract_tasks_with_llm(text)
@@ -171,13 +171,12 @@ class MeetingAssistant:
             return self._extract_tasks_fallback(text)
 
     def _extract_tasks_with_llm(self, text):
-        """Use Mistral-7B to extract structured action items from transcript"""
+        """Use Phi-3-mini to extract structured action items from transcript"""
         try:
             if LANGCHAIN_AVAILABLE and hasattr(self, 'task_extraction_template'):
                 messages = self.task_extraction_template.format_messages(
                     meeting_text=text[:4000]
                 )
-                # Convert LangChain messages to dicts for InferenceClient
                 api_messages = [
                     {"role": "system" if m.type == "system" else "user", "content": m.content}
                     for m in messages
@@ -188,7 +187,7 @@ class MeetingAssistant:
                     {"role": "user", "content": f"Extract ALL actionable tasks from this meeting transcript:\n\n{text[:4000]}\n\nEXTRACTED TASKS:"}
                 ]
 
-            logger.info("⚡ Extracting action items via Mistral-7B...")
+            logger.info("⚡ Extracting action items via Phi-3-mini...")
             response = self.client.chat_completion(
                 messages=api_messages,
                 model=self.LLM_MODEL,
@@ -243,7 +242,7 @@ class MeetingAssistant:
             return "• Error extracting tasks from meeting content"
     
     def summarize_text(self, text):
-        """Summarize via HF Inference API (bart-large-cnn) or fallback"""
+        """Summarize via HF Inference API (bart-large-cnn-samsum) or fallback"""
         try:
             if not self.client:
                 return self.enhanced_fallback_summary(text)
@@ -251,7 +250,7 @@ class MeetingAssistant:
             if len(text) < 100:
                 return self.enhanced_fallback_summary(text)
 
-            logger.info("⚡ Summarizing via HF Inference API (bart-large-cnn)...")
+            logger.info("⚡ Summarizing via HF Inference API (bart-large-cnn-samsum)...")
             result = self.client.summarization(
                 text,
                 model=self.SUM_MODEL,
@@ -336,7 +335,7 @@ class MeetingAssistant:
         return self.enhanced_fallback_summary(text)
     
     def analyze_sentiment(self, text):
-        """Analyze sentiment via HF Inference API (roberta-base-sentiment) on full transcript"""
+        """Analyze sentiment via HF Inference API (emotion-english-distilroberta) on full transcript"""
         try:
             if not self.client:
                 return self.fallback_sentiment_analysis(text)
@@ -344,26 +343,27 @@ class MeetingAssistant:
             if len(text) < 20:
                 return self.fallback_sentiment_analysis(text)
 
-            logger.info("⚡ Analyzing sentiment via HF Inference API (full transcript)...")
+            logger.info("⚡ Analyzing emotions via HF Inference API (full transcript)...")
             result = self.client.text_classification(
                 text,
                 model=self.SENT_MODEL
             )
             if isinstance(result, list) and len(result) > 0:
-                sentiment = result[0]
-                label = sentiment.get("label", "UNKNOWN").upper()
-                score = sentiment.get("score", 0)
-                label_map = {
-                    "POSITIVE": "Positive", "NEGATIVE": "Negative", "NEUTRAL": "Neutral",
-                    "LABEL_0": "Negative", "LABEL_1": "Neutral", "LABEL_2": "Positive",
-                }
-                mapped = label_map.get(label, label.title())
-                return f"Overall Sentiment: {mapped} (Confidence: {score * 100:.1f}%)"
+                emotions = result
+                top_emotion = max(emotions, key=lambda x: x.get("score", 0))
+                label = top_emotion.get("label", "neutral").lower()
+                score = top_emotion.get("score", 0)
+                
+                all_emotions = ", ".join(
+                    f"{e.get('label', '?').title()}: {e.get('score', 0)*100:.1f}%" 
+                    for e in sorted(emotions, key=lambda x: x.get('score', 0), reverse=True)[:3]
+                )
+                return f"Primary Emotion: {label.title()} ({score*100:.1f}%) | Top Emotions: {all_emotions}"
             else:
                 return self.fallback_sentiment_analysis(text)
 
         except Exception as e:
-            logger.warning(f"API sentiment failed, falling back: {e}")
+            logger.warning(f"API emotion analysis failed, falling back: {e}")
             return self.fallback_sentiment_analysis(text)
     
     def fallback_sentiment_analysis(self, text):
