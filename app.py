@@ -1265,12 +1265,13 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
             inputs=[audio_input],
             outputs=[output_display, download_file],
             js="""
-            function() {
+            function(...args) {
                 var audioEl = document.querySelector('#audio-upload audio');
                 var hasAudio = audioEl && audioEl.src && audioEl.src !== window.location.href;
                 if (hasAudio && window.__uploadStatus) {
                     window.__uploadStatus.set('processing', 'PROCESSING...');
                 }
+                return args;
             }
             """
         )
