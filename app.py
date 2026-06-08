@@ -6,6 +6,8 @@ import re
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+import wave
+import struct
 
 # Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
 import gradio_client.utils as _gc_utils
@@ -584,7 +586,7 @@ function() {
     }, 1000);
     
     /* ═══════════════════════════════════════════
-       UPLOAD STATUS — global helpers + document-level listeners
+       UPLOAD STATUS — global helpers + robust listeners
        ═══════════════════════════════════════════ */
     window.__uploadStatus = {
         el: null,
@@ -601,7 +603,7 @@ function() {
         }
     };
 
-    /* Detect file selection in #audio-upload (capture phase — fires before Gradio) */
+    /* Detect native file input change (manual upload) */
     document.addEventListener('change', function(e) {
         var t = e.target;
         if (t && t.tagName === 'INPUT' && t.type === 'file' && t.closest && t.closest('#audio-upload') && t.files && t.files.length > 0) {
@@ -609,18 +611,34 @@ function() {
         }
     }, true);
 
-    /* Poll for <audio> element inside #audio-upload — upload/recording complete */
-    var __audioCheck = setInterval(function() {
-        var audio = document.querySelector('#audio-upload audio');
-        if (audio && audio.src && audio.src !== window.location.href && audio.readyState >= 2) {
-            window.__uploadStatus.set('complete', 'UPLOAD COMPLETE');
-        }
-    }, 600);
+    /* MutationObserver — catch sample clicks, uploads, recording */
+    var __audioObs = setInterval(function() {
+        var uploadZone = document.getElementById('audio-upload');
+        if (!uploadZone) return;
+        clearInterval(__audioObs);
+
+        var obs = new MutationObserver(function() {
+            var audio = uploadZone.querySelector('audio');
+            if (audio && audio.src && audio.src !== window.location.href) {
+                // Audio element appeared — uploading or loading sample
+                window.__uploadStatus.set('uploading', 'LOADING AUDIO...');
+                if (audio.addEventListener) {
+                    audio.addEventListener('canplay', function() {
+                        window.__uploadStatus.set('complete', 'AUDIO READY');
+                    }, { once: true });
+                    audio.addEventListener('error', function() {
+                        window.__uploadStatus.set('', 'AWAITING INPUT');
+                    }, { once: true });
+                }
+            }
+        });
+        obs.observe(uploadZone, { childList: true, subtree: true });
+    }, 200);
 
     /* CLEAR button — reset status */
     document.addEventListener('click', function(e) {
         if (e.target && e.target.closest && e.target.closest('#btn-clear')) {
-            setTimeout(function() { window.__uploadStatus.set('', 'AWAITING INPUT'); }, 150);
+            setTimeout(function() { window.__uploadStatus.set('', 'AWAITING INPUT'); }, 100);
         }
     });
 
@@ -629,7 +647,7 @@ function() {
         var term = document.getElementById('output-terminal');
         if (!term) return;
         clearInterval(__termReady);
-        var obs = new MutationObserver(function() {
+        var tobs = new MutationObserver(function() {
             var ta = term.querySelector('textarea');
             if (ta && ta.value && ta.value.trim().length > 0
                 && ta.value.indexOf('Error') !== 0
@@ -638,7 +656,7 @@ function() {
                 setTimeout(function() { window.__uploadStatus.set('', 'AWAITING INPUT'); }, 3500);
             }
         });
-        obs.observe(term, { childList: true, subtree: true, characterData: true });
+        tobs.observe(term, { childList: true, subtree: true, characterData: true });
     }, 300);
     
     return [];
@@ -712,8 +730,8 @@ body::before{
 ::-webkit-scrollbar-thumb:hover{background:var(--acc)}
 
 /* ═══ GRADIO CONTAINER OVERRIDES ═══ */
-.gradio-container{max-width:100%!important;padding:0!important;background:transparent!important;margin:0!important}
-.gradio-container .contain{max-width:1100px!important;margin:0 auto!important;padding:0 2.5rem!important}
+.gradio-container{max-width:100%!important;width:100%!important;padding:0!important;background:transparent!important;margin:0!important}
+.gradio-container .contain{max-width:100%!important;min-width:100%!important;width:100%!important;margin:0 auto!important;padding:0 3rem!important}
 .gradio-container .app{background:transparent!important}
 .gradio-container .main{background:transparent!important}
 .gr-box,.gr-panel,.gr-form{background:transparent!important;border:none!important;box-shadow:none!important;border-radius:0!important}
@@ -738,7 +756,7 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
 .brutal-header{
     text-align:center;
     padding:3.5rem 2.5rem 1.5rem;
-    max-width:1100px;
+    max-width:100%;
     margin:0 auto;
     position:relative;
 }
@@ -792,9 +810,9 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
 .main-content{
     display:flex!important;
     gap:0!important;
-    max-width:1100px!important;
+    max-width:100%!important;
     margin:0 auto!important;
-    padding:0 2.5rem!important;
+    padding:0 3rem!important;
     flex-wrap:wrap!important;
 }
 .main-content > .gr-column{padding:0!important}
@@ -914,8 +932,8 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
     display:flex;
     align-items:center;
     gap:0.5rem;
-    padding:0.5rem 0.75rem;
-    margin-bottom:0.75rem;
+    padding:0.6rem 0.85rem;
+    margin-bottom:0.85rem;
     background:var(--bg3);
     border:1px solid var(--bdr);
     font-family:var(--fm);
@@ -924,16 +942,38 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
     text-transform:uppercase;
     color:var(--txt2);
     transition:all var(--t);
+    position:relative;
+    overflow:hidden;
 }
 .upload-status.uploading{
     border-color:var(--acc);
     color:var(--acc);
     background:rgba(255,107,53,0.06);
+    box-shadow:inset 0 0 18px rgba(255,107,53,0.08);
+}
+.upload-status.uploading::after{
+    content:'';
+    position:absolute;
+    top:0;left:-100%;
+    width:60%;
+    height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,107,53,0.08),transparent);
+    animation:shimmer 1.4s ease-in-out infinite;
 }
 .upload-status.processing{
     border-color:var(--acc);
     color:var(--acc);
     background:rgba(255,107,53,0.08);
+    box-shadow:inset 0 0 22px rgba(255,107,53,0.10);
+}
+.upload-status.processing::after{
+    content:'';
+    position:absolute;
+    top:0;left:-100%;
+    width:40%;
+    height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,107,53,0.12),transparent);
+    animation:shimmer 0.9s ease-in-out infinite;
 }
 .upload-status.complete{
     border-color:#22c55e;
@@ -941,14 +981,17 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
     background:rgba(34,197,94,0.06);
 }
 .status-dot{
-    width:8px;
-    height:8px;
+    width:10px;
+    height:10px;
     border-radius:50%;
     background:currentColor;
     flex-shrink:0;
     opacity:0.6;
     transition:all var(--t);
+    position:relative;
+    z-index:1;
 }
+.status-text{position:relative;z-index:1}
 .upload-status.uploading .status-dot,
 .upload-status.processing .status-dot{
     opacity:1;
@@ -957,10 +1000,15 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
 .upload-status.complete .status-dot{
     opacity:1;
     background:#22c55e;
+    animation:none;
 }
 @keyframes statusPulse{
-    0%,100%{transform:scale(1);opacity:1}
-    50%{transform:scale(1.6);opacity:0.4}
+    0%,100%{transform:scale(1);opacity:1;box-shadow:0 0 4px currentColor}
+    50%{transform:scale(1.8);opacity:0.4;box-shadow:0 0 12px currentColor}
+}
+@keyframes shimmer{
+    0%{left:-100%}
+    100%{left:160%}
 }
 
 /* ═══ OUTPUT TERMINAL ═══ */
@@ -1080,7 +1128,7 @@ button,.gr-button{
 }
 
 /* ═══ FOOTER ═══ */
-.brutal-footer{text-align:center;padding:2.5rem 2.5rem 3rem;max-width:1100px;margin:0 auto}
+.brutal-footer{text-align:center;padding:2.5rem 2.5rem 3rem;max-width:100%;margin:0 auto}
 .footer-rule{
     width:100%;
     height:1px;
@@ -1249,6 +1297,54 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
     
     return interface
 
+
+def _generate_demo_audio():
+    """Generate a demo meeting WAV file at startup if it doesn't exist."""
+    demo_path = os.path.join(os.path.dirname(__file__), "sample_meeting.wav")
+    if os.path.exists(demo_path) and os.path.getsize(demo_path) > 1000:
+        return demo_path
+
+    sample_rate = 16000
+    duration = 12.0
+    n_frames = int(sample_rate * duration)
+
+    def _env(t, start, end, attack=0.05, release=0.05):
+        if t < start or t > end:
+            return 0.0
+        rel = t - start
+        dur = end - start
+        if rel < attack:
+            return rel / attack
+        if rel > dur - release:
+            return max(0.0, (dur - rel) / release)
+        return 1.0
+
+    import math, random
+    speakers = [(440.0, 0.0, 2.5), (554.0, 3.0, 5.5), (659.0, 6.0, 8.5), (440.0, 9.0, 11.0)]
+    audio_data = []
+    for i in range(n_frames):
+        t = i / sample_rate
+        s = 0.0
+        for freq, start, end in speakers:
+            e = _env(t, start, end)
+            if e > 0:
+                s += e * 0.3 * math.sin(2 * math.pi * freq * t)
+                s += e * 0.1 * math.sin(2 * math.pi * freq * 2 * t)
+        s += (random.random() - 0.5) * 0.01
+        audio_data.append(int(max(-1.0, min(1.0, s)) * 32767))
+
+    with wave.open(demo_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.setnframes(n_frames)
+        wf.setcomptype("NONE", "not compressed")
+        wf.writeframes(struct.pack("<" + "h" * len(audio_data), *audio_data))
+    return demo_path
+
+
+# Ensure demo audio exists before initializing the assistant
+_generate_demo_audio()
 
 # Initialize the meeting assistant
 meeting_assistant = MeetingAssistant()
