@@ -5,6 +5,7 @@ from datetime import datetime
 import re
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 # Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
 import gradio_client.utils as _gc_utils
@@ -420,7 +421,7 @@ class MeetingAssistant:
             logger.error(f"Error identifying topics: {str(e)}")
             return "• Error analyzing topics"
     
-    def process_meeting_simple(self, audio_file):
+    def process_meeting_simple(self, audio_file, progress=None):
         """Process meeting audio via HF Inference API (serverless pipeline)"""
         if audio_file is None:
             return "", None
@@ -430,6 +431,9 @@ class MeetingAssistant:
         try:
             logger.info("🚀 Starting meeting processing via HF Inference API...")
             
+            if progress is not None:
+                progress(0.1, desc="Transcribing audio...")
+            
             # Step 1: Transcription (whisper-large-v3-turbo via API)
             transcription, _ = self.transcribe_audio(audio_file)
             if transcription.startswith("Error") or transcription.startswith("HF_TOKEN") or "unavailable" in transcription:
@@ -438,16 +442,29 @@ class MeetingAssistant:
             transcript_time = time.time() - start_time
             logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
             
+            if progress is not None:
+                progress(0.3, desc="Running parallel analysis...")
+            
             # Step 2: Analysis (all via API, fallback to local methods on failure)
+            # Run all independent analysis calls in parallel via ThreadPoolExecutor
             analysis_start = time.time()
             
-            summary = self.summarize_text(transcription)
-            action_items = self.extract_action_items(transcription)
-            sentiment = self.analyze_sentiment(transcription)
-            key_topics = self.identify_key_topics(transcription)
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                fut_summary = executor.submit(self.summarize_text, transcription)
+                fut_actions = executor.submit(self.extract_action_items, transcription)
+                fut_sentiment = executor.submit(self.analyze_sentiment, transcription)
+                fut_topics = executor.submit(self.identify_key_topics, transcription)
+                
+                summary = fut_summary.result()
+                action_items = fut_actions.result()
+                sentiment = fut_sentiment.result()
+                key_topics = fut_topics.result()
             
             analysis_time = time.time() - analysis_start
             logger.info(f"⚡ Analysis completed in {analysis_time:.2f}s")
+            
+            if progress is not None:
+                progress(0.85, desc="Generating report...")
             
             # Step 3: Generate comprehensive report
             meeting_minutes = self._generate_meeting_report(
@@ -493,11 +510,11 @@ class MeetingAssistant:
 {sep}"""
 
 
-def process_meeting_audio(audio_file):
+def process_meeting_audio(audio_file, progress=gr.Progress()):
     if audio_file is None:
         return "Please upload an audio file to analyze.", None
 
-    meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file)
+    meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file, progress=progress)
 
     if meeting_report and not meeting_report.startswith("Error"):
         return meeting_report, temp_file
@@ -1241,6 +1258,7 @@ demo = create_interface()
 # Set theme and js as attributes (Gradio 5+ compat — also set in Blocks() ctor)
 demo.theme = gr.themes.Base()
 demo.js = custom_js
+demo.queue(default_concurrency_limit=3)
 demo.launch(
     server_name="0.0.0.0",
     server_port=7860,

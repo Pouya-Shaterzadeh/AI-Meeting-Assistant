@@ -10,11 +10,7 @@ huggingface-hub>=0.23.5,<0.26.0
 langchain>=0.1.0
 langchain-core>=0.1.0
 
-# Audio processing
+# Audio processing (used by Gradio Audio component)
 librosa>=0.10.0
 soundfile>=0.12.0
 ffmpeg-python>=0.2.0
-
-# Scientific computing
-numpy>=1.24.0
-scipy>=1.11.0
