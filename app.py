@@ -1299,11 +1299,26 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
 
 
 def _generate_demo_audio():
-    """Generate a demo meeting WAV file at startup if it doesn't exist."""
+    """Ensure the demo meeting WAV file exists — uses embedded audio data."""
     demo_path = os.path.join(os.path.dirname(__file__), "sample_meeting.wav")
     if os.path.exists(demo_path) and os.path.getsize(demo_path) > 1000:
         return demo_path
 
+    try:
+        from sample_audio_data import get_demo_audio
+        audio_bytes = get_demo_audio()
+        with open(demo_path, "wb") as f:
+            f.write(audio_bytes)
+        logger.info(f"✅ Demo audio extracted ({len(audio_bytes)} bytes)")
+        return demo_path
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load embedded audio: {e} — generating tones")
+        return _generate_synthetic_audio(demo_path)
+
+
+def _generate_synthetic_audio(path):
+    """Fallback: generate simple multi-speaker tone WAV file."""
+    import math, random
     sample_rate = 16000
     duration = 12.0
     n_frames = int(sample_rate * duration)
@@ -1319,7 +1334,6 @@ def _generate_demo_audio():
             return max(0.0, (dur - rel) / release)
         return 1.0
 
-    import math, random
     speakers = [(440.0, 0.0, 2.5), (554.0, 3.0, 5.5), (659.0, 6.0, 8.5), (440.0, 9.0, 11.0)]
     audio_data = []
     for i in range(n_frames):
@@ -1333,14 +1347,14 @@ def _generate_demo_audio():
         s += (random.random() - 0.5) * 0.01
         audio_data.append(int(max(-1.0, min(1.0, s)) * 32767))
 
-    with wave.open(demo_path, "wb") as wf:
+    with wave.open(path, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.setnframes(n_frames)
         wf.setcomptype("NONE", "not compressed")
         wf.writeframes(struct.pack("<" + "h" * len(audio_data), *audio_data))
-    return demo_path
+    return path
 
 
 # Ensure demo audio exists before initializing the assistant
