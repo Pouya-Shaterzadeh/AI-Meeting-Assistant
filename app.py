@@ -469,7 +469,7 @@ class MeetingAssistant:
                 logger.info(f"⚡ Long audio detected ({duration:.1f}s), using chunked processing")
             
             # Step 1: Transcription
-            if progress:
+            if progress is not None:
                 progress(0.1, desc="Transcribing audio...")
             
             if is_long_audio:
@@ -496,7 +496,7 @@ class MeetingAssistant:
             logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
             
             # Step 2: Analysis
-            if progress:
+            if progress is not None:
                 progress(0.3, desc="Running parallel analysis...")
             
             analysis_start = time.time()
@@ -534,7 +534,7 @@ class MeetingAssistant:
             analysis_time = time.time() - analysis_start
             logger.info(f"⚡ Analysis completed in {analysis_time:.2f}s")
             
-            if progress:
+            if progress is not None:
                 progress(0.85, desc="Generating report...")
             
             # Step 3: Generate comprehensive report
@@ -707,7 +707,7 @@ class MeetingAssistant:
             
             if duration <= self.CHUNK_DURATION * 2:
                 # Short audio - transcribe directly
-                if progress:
+                if progress is not None:
                     progress(0.15, desc="Transcribing audio...")
                 result = self.client.automatic_speech_recognition(
                     audio_path,
@@ -721,7 +721,7 @@ class MeetingAssistant:
             
             transcriptions = []
             for i, chunk in enumerate(chunks):
-                if progress:
+                if progress is not None:
                     progress_val = 0.1 + (0.2 * (i / len(chunks)))
                     progress(progress_val, desc=f"Transcribing chunk {i+1}/{len(chunks)}...")
                 
@@ -794,7 +794,7 @@ class MeetingAssistant:
             # Map phase: summarize each chunk
             chunk_summaries = []
             for i, chunk in enumerate(chunks):
-                if progress:
+                if progress is not None:
                     progress_val = 0.3 + (0.4 * (i / len(chunks)))
                     progress(progress_val, desc=f"Summarizing chunk {i+1}/{len(chunks)}...")
                 
@@ -805,7 +805,7 @@ class MeetingAssistant:
             combined_summaries = "\n".join(chunk_summaries)
             
             # Final summary
-            if progress:
+            if progress is not None:
                 progress(0.7, desc="Generating final summary...")
             
             final_summary = self.summarize_text(combined_summaries)
