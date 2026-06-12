@@ -1763,21 +1763,45 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
 
 
 def _generate_demo_audio():
-    """Ensure the demo meeting WAV file exists — uses embedded audio data."""
+    """Ensure the demo meeting WAV file exists — download from HF Hub or use embedded fallback."""
     demo_path = os.path.join(os.path.dirname(__file__), "sample_meeting.wav")
     if os.path.exists(demo_path) and os.path.getsize(demo_path) > 1000:
         return demo_path
 
+    # Try downloading from HF Hub dataset
+    try:
+        from huggingface_hub import hf_hub_download
+        hf_token = os.environ.get("HF_TOKEN")
+        downloaded = hf_hub_download(
+            repo_id="PouyaDevA1/ai-meeting-samples",
+            filename="sample_meeting.wav",
+            repo_type="dataset",
+            token=hf_token,
+            local_dir=os.path.dirname(demo_path),
+            local_dir_use_symlinks=False,
+        )
+        # hf_hub_download may return a different path; rename to expected
+        if downloaded != demo_path and os.path.exists(downloaded):
+            import shutil
+            shutil.move(downloaded, demo_path)
+        logger.info(f"✅ Demo audio downloaded from HF Hub ({os.path.getsize(demo_path)} bytes)")
+        return demo_path
+    except Exception as e:
+        logger.warning(f"⚠️ Could not download from HF Hub: {e}")
+
+    # Fallback: try embedded audio data
     try:
         from sample_audio_data import get_demo_audio
         audio_bytes = get_demo_audio()
         with open(demo_path, "wb") as f:
             f.write(audio_bytes)
-        logger.info(f"✅ Demo audio extracted ({len(audio_bytes)} bytes)")
+        logger.info(f"✅ Demo audio extracted from embedded data ({len(audio_bytes)} bytes)")
         return demo_path
     except Exception as e:
         logger.warning(f"⚠️ Could not load embedded audio: {e} — generating tones")
-        return _generate_synthetic_audio(demo_path)
+
+    # Last resort: generate synthetic audio
+    return _generate_synthetic_audio(demo_path)
 
 
 def _generate_synthetic_audio(path):
