@@ -342,24 +342,35 @@ Format each task as:
                 score = 0
                 lower = s.lower()
                 
-                # Position
-                if i < 2: score += 2
+                # Position: early sentences often contain key info
+                if i == 0: score += 3
+                if i == 1: score += 2
                 if i >= len(sentences) - 2: score += 1
                 
-                # Content importance
-                if any(w in lower for w in ['announce', 'launch', 'iposub', 'acquisition', 'merger']):
-                    score += 6
-                if re.search(r'\$\d|revenue|profit|earnings|financial|forecast', lower):
+                # Financial metrics (highest priority)
+                if re.search(r'\$\d|revenue|profit|earnings|financial|forecast|budget', lower):
                     score += 4
-                if any(w in lower for w in ['growth', 'strategy', 'plan', 'target', 'outlook']):
+                if re.search(r'\d+%|\d+\.\d+%|percent|ratio', lower):
                     score += 3
-                if any(w in lower for w in ['thank', 'conclude', 'look forward']):
-                    score += 0  # low priority
+                
+                # Risk & management
+                if any(w in lower for w in ['risk', 'loss', 'leverage', 'confidence', 'maximum', 'exceed']):
+                    score += 3
+                if any(w in lower for w in ['conservative', 'approach', 'manage', 'healthy', 'adopted']):
+                    score += 2
+                
+                # Key business events
+                if any(w in lower for w in ['announce', 'launch', 'ipo', 'acquisition', 'merger', 'partnership']):
+                    score += 5
+                
+                # Strategy & outlook
+                if any(w in lower for w in ['growth', 'strategy', 'plan', 'target', 'outlook', 'forecast']):
+                    score += 3
                 
                 scored.append((score, i, s))
             
-            # Take top 2 sentences, preserve order
-            top = sorted(scored, key=lambda x: -x[0])[:2]
+            # Take top 3 sentences, preserve order
+            top = sorted(scored, key=lambda x: -x[0])[:3]
             top.sort(key=lambda x: x[1])
             
             summary = ". ".join(s[2] for s in top)
