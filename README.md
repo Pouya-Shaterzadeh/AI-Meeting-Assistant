@@ -14,105 +14,70 @@ tags:
 - transcription
 - nlp
 - productivity
-- multilingual
 - whisper
 - langchain
 thumbnail: >-
   https://cdn-uploads.huggingface.co/production/uploads/688f59b4fe95b912726282f2/U_NjwBUEE1uVbXIJ1uuPd.png
 ---
 
-# 🎯 AI Meeting Assistant
+# AI Meeting Assistant
 
-> Transform your meeting recordings and notes into actionable insights with AI-powered analysis and fast output translation
+> Transform your meeting recordings into actionable insights with AI-powered analysis.
 
 **Created by:** [PouyaDevA1](https://huggingface.co/PouyaDevA1) | **Free & Open Source**
 
-## ✨ Features & Capabilities
+## Features
 
-- **🎙️ Enhanced Audio Transcription**: Whisper-medium model for superior accuracy
-- **📝 Advanced Task Extraction**: ChatPromptTemplate-based approach for precise action item identification
-- **🌍 Fast Output Translation**: Instantly translate results to Persian, Turkish, and Arabic
-- **📊 Smart Summarization**: Generate concise summaries using Facebook BART model
-- **💭 Sentiment Analysis**: Understand meeting tone with Cardiff RoBERTa model
-- **✅ Intelligent Action Items**: Enhanced task extraction using LangChain prompt templates
-- **🔑 Key Topic Identification**: Discover main discussion themes with advanced pattern matching
-- **📄 Comprehensive Reports**: Generate detailed meeting minutes with all insights
-- **🔄 Intelligent Fallbacks**: Robust system that works even when AI models are unavailable
-- **🎨 Professional UI**: Clean, dark-themed interface with translation options
+- **Audio Transcription** — Whisper-large-v3-turbo for high-accuracy speech-to-text
+- **Executive Summary** — Phi-3-mini generates concise, metric-focused summaries
+- **Task Extraction** — LLM-powered action item detection with single-speaker awareness
+- **Sentiment Analysis** — Emotion classification via DistilRoBERTa
+- **Key Topic Identification** — Semantic noun-phrase pattern matching
+- **Chunked Processing** — 30s windows with map-reduce for long meetings (up to 60 min)
+- **Downloadable Reports** — Export meeting minutes as text files
+- **Sample Audio** — Try it instantly with a built-in sample meeting
 
-## 💡 How It Works
+## How It Works
 
-1. **Upload Audio** 📤 - Drop your meeting recording (MP3, WAV, M4A, etc.)
-2. **Select Languages** 🌍 - Choose translation options (Persian, Turkish, Arabic)
-3. **AI Processing** 🧠 - Advanced AI analyzes and extracts insights
-4. **Get Results** 📊 - Receive comprehensive meeting minutes and translations
-5. **Download Reports** 💾 - Save your complete meeting analysis
+1. **Upload Audio** — Drop your meeting recording (WAV, MP3, M4A, etc.)
+2. **AI Processing** — Transcription, summarization, sentiment, and topic extraction run in parallel
+3. **Get Results** — Receive a structured meeting report
+4. **Download** — Save your analysis as a text file
 
-## 🤖 AI Models Used
+## AI Models
 
-All models are **completely free and open-source**:
+All models are **free and open-source**, served via Hugging Face Inference API:
 
-- **OpenAI Whisper-Medium** (MIT License) - High-accuracy speech-to-text transcription
-- **Facebook BART** (MIT License) - Advanced text summarization  
-- **Cardiff RoBERTa** (Apache 2.0) - Sophisticated sentiment analysis
-- **LangChain ChatPromptTemplate** (MIT License) - Structured task extraction
-- **Helsinki-NLP Opus Models** (Apache 2.0) - Fast output translation
-  - English to Persian (فارسی)
-  - English to Turkish (Türkçe)  
-  - English to Arabic (العربية)
+| Model | Purpose | License |
+|-------|---------|---------|
+| OpenAI Whisper-large-v3-turbo | Speech-to-text | MIT |
+| Microsoft Phi-3-mini-4k-instruct | Executive summary & task extraction | MIT |
+| BART-large-cnn-samsum | Summarization fallback | MIT |
+| Cardiff DistilRoBERTa | Sentiment analysis | Apache 2.0 |
 
-### Model Fallbacks
-- Intelligent fallback systems ensure the app works even when models are unavailable
-- Enhanced pattern-based analysis with ChatPromptTemplate structure
-- Comprehensive error handling with informative user feedback
+## Technical Details
 
-## 🎯 Perfect For
+- **Framework**: Gradio 4.44.1
+- **Backend**: Hugging Face Inference API (serverless)
+- **Language**: Python 3.12+
+- **Deployment**: Hugging Face Spaces
+- **License**: MIT
 
-- **Business Meetings** - Board meetings, team standups, client calls
-- **Interviews** - Job interviews, research interviews, user feedback sessions
-- **Lectures & Seminars** - Educational content, training sessions, workshops
-- **Brainstorming Sessions** - Creative meetings, planning sessions, retrospectives
-- **Conference Calls** - Remote meetings, international collaborations
-
-## 🚀 Quick Start
+## Quick Start
 
 1. Visit the [Live App](https://huggingface.co/spaces/PouyaDevA1/ai-meeting-assistant)
-2. Upload your meeting audio file
-3. Click "Submit" and wait for AI processing
-4. Download your comprehensive meeting analysis
+2. Upload your meeting audio or try the sample
+3. Click **Submit**
+4. Download your meeting analysis
 
-## 📋 Output Includes
+## Output
 
-- **Meeting Summary** - Key points and important discussions
-- **Action Items** - Specific tasks and assignments with enhanced extraction
-- **Sentiment Analysis** - Meeting tone and participant engagement
-- **Key Topics** - Main themes and discussion areas
-- **Full Transcription** - Complete meeting transcript
-- **Translated Results** - Fast output translation in Persian, Turkish, and Arabic
-
-## 🔧 Technical Details
-
-- **Framework**: Gradio 4.44.0
-- **AI Models**: Whisper-medium, BART, RoBERTa, LangChain
-- **Languages**: Python 3.12+
-- **Deployment**: Hugging Face Spaces
-- **License**: MIT (Free for all uses)
-
-## 🌟 Why Choose This Assistant?
-
-- **100% Free** - No API keys, subscriptions, or hidden costs
-- **Privacy Focused** - Your data stays secure and private
-- **Open Source** - Full transparency and community-driven
-- **Fast Translation** - Instant text-to-text translation of results
-- **Reliable** - Intelligent fallbacks ensure consistent performance
-- **Professional** - Enterprise-ready with comprehensive analysis
-
-## 📞 Support & Feedback
-
-- **Creator**: [PouyaDevA1](https://huggingface.co/PouyaDevA1)
-- **Issues**: Report bugs or request features
-- **Community**: Join discussions and share feedback
+- **Executive Summary** — 2-3 sentence overview with key metrics
+- **Action Items** — Extracted tasks (or "No actionable tasks" for single-speaker)
+- **Sentiment** — Primary emotion with confidence scores
+- **Key Topics** — Main discussion themes
+- **Meeting Type** — Presentation, 1-on-1, or multi-participant
 
 ---
 
-**🎉 Start analyzing your meetings today with AI-powered insights and fast multilingual translation!**
+**Start analyzing your meetings today with AI-powered insights!**
