@@ -479,12 +479,15 @@ class MeetingAssistant:
                     audio_file,
                     model=self.ASR_MODEL
                 )
+                logger.info(f"  ASR result type: {type(result).__name__}")
                 if isinstance(result, dict):
                     transcription = result.get("text", "")
                 elif isinstance(result, str):
                     transcription = result
                 else:
+                    logger.warning(f"  Unexpected ASR result: {result}")
                     transcription = ""
+                logger.info(f"  Transcription length: {len(transcription)} chars")
             
             if not transcription:
                 return "No speech detected in the audio file.", None
@@ -512,6 +515,7 @@ class MeetingAssistant:
                     key_topics = fut_topics.result()
             else:
                 # Short transcript - run all in parallel
+                logger.info(f"⚡ Running parallel analysis on {len(transcription)} chars...")
                 with ThreadPoolExecutor(max_workers=4) as executor:
                     fut_summary = executor.submit(self.summarize_text, transcription)
                     fut_actions = executor.submit(self.extract_action_items, transcription)
@@ -519,9 +523,13 @@ class MeetingAssistant:
                     fut_topics = executor.submit(self.identify_key_topics, transcription)
                     
                     summary = fut_summary.result()
+                    logger.info("  ✅ Summary done")
                     action_items = fut_actions.result()
+                    logger.info("  ✅ Action items done")
                     sentiment = fut_sentiment.result()
+                    logger.info("  ✅ Sentiment done")
                     key_topics = fut_topics.result()
+                    logger.info("  ✅ Topics done")
             
             analysis_time = time.time() - analysis_start
             logger.info(f"⚡ Analysis completed in {analysis_time:.2f}s")
@@ -545,8 +553,10 @@ class MeetingAssistant:
             return meeting_minutes, temp_file.name
             
         except Exception as e:
+            import traceback
             error_msg = f"Error processing meeting: {str(e)}"
             logger.error(error_msg)
+            logger.error(traceback.format_exc())
             return error_msg, None
     
     def _get_audio_duration(self, audio_path):
