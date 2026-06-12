@@ -298,34 +298,68 @@ Format each task as:
             return "• Error extracting tasks from meeting content"
     
     def summarize_text(self, text):
-        """Summarize via HF Inference API (bart-large-cnn-samsum) with concise output"""
-        try:
-            if not self.client:
-                return self.concise_executive_summary(text)
+        """Summarize via LLM with fallback chain"""
+        # Chain: Phi-3-mini (semantic) → BART (API) → keyword fallback
+        if self.client and len(text) > 50:
+            try:
+                return self._llm_executive_summary(text)
+            except Exception as e:
+                logger.warning(f"LLM summary failed: {e}")
 
-            if len(text) < 100:
-                return self.concise_executive_summary(text)
+        if self.client and len(text) > 100:
+            try:
+                return self._bart_summary(text)
+            except Exception as e:
+                logger.warning(f"BART summary failed: {e}")
 
-            logger.info("⚡ Summarizing via HF Inference API (bart-large-cnn-samsum)...")
-            result = self.client.summarization(
-                text,
-                model=self.SUM_MODEL,
-                parameters={"max_length": 150, "min_length": 30, "do_sample": False}
-            )
-            if isinstance(result, dict):
-                summary = result.get("summary_text", "")
-            elif isinstance(result, str):
-                summary = result
-            else:
-                summary = ""
-            if not summary:
-                return self.concise_executive_summary(text)
-            logger.info("✅ Summarization completed via API")
-            return summary
+        return self.concise_executive_summary(text)
 
-        except Exception as e:
-            logger.warning(f"API summarization failed, falling back: {e}")
-            return self.concise_executive_summary(text)
+    def _llm_executive_summary(self, text):
+        """Use Phi-3-mini to generate semantic executive summary"""
+        api_messages = [
+            {"role": "system", "content": """You are an expert executive assistant writing meeting minutes.
+
+TASK: Analyze the transcript and write a 2-3 sentence executive summary.
+
+RULES:
+- Capture the MOST IMPORTANT points: financial metrics, risk indicators, strategic announcements, outlook
+- Be SPECIFIC with numbers (revenue figures, percentages, ratios)
+- Do NOT include filler phrases like "the speaker mentioned" or "in this meeting"
+- Output ONLY the summary sentences, nothing else
+- Do NOT add bullet points or formatting — just plain sentences
+
+EXAMPLE INPUT:
+"Our Q1 revenue was $50 million, up 15% year-over-year. We launched the new AI platform last month. Customer retention improved to 92%. We expect continued growth in Q2."
+
+EXAMPLE OUTPUT:
+"Q1 revenue reached $50 million, a 15% year-over-year increase, with customer retention improving to 92% following the launch of the new AI platform. Continued growth is expected in Q2."
+"""},
+            {"role": "user", "content": f"Write a 2-3 sentence executive summary of this transcript:\n\n{text[:3000]}"}
+        ]
+
+        response = self.client.chat_completion(
+            messages=api_messages,
+            model=self.LLM_MODEL,
+            max_tokens=200,
+            temperature=0.1
+        )
+        choices = response.get("choices", [])
+        if choices and choices[0].get("message", {}).get("content"):
+            return choices[0]["message"]["content"].strip()
+        raise Exception("No content returned")
+
+    def _bart_summary(self, text):
+        """Use BART-SAMSum for summarization"""
+        result = self.client.summarization(
+            text,
+            model=self.SUM_MODEL,
+            parameters={"max_length": 150, "min_length": 30, "do_sample": False}
+        )
+        if isinstance(result, dict):
+            return result.get("summary_text", "")
+        elif isinstance(result, str):
+            return result
+        raise Exception("Invalid result format")
     
     def concise_executive_summary(self, text):
         """Produce 2-3 sentence executive summary for minute-taking"""
