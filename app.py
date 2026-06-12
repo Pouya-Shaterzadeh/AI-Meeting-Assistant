@@ -328,49 +328,41 @@ Format each task as:
             return self.concise_executive_summary(text)
     
     def concise_executive_summary(self, text):
-        """Produce 3-5 sentence executive summary for minute-taking"""
+        """Produce 2-3 sentence executive summary for minute-taking"""
         try:
             sentences = re.split(r'[.!?]+', text)
             sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
             
             if not sentences:
-                return text[:200] + "..." if len(text) > 200 else text
+                return text[:150] + "..." if len(text) > 150 else text
             
-            # Strategy: pick the 3-4 most important sentences
-            scored_sentences = []
-            
-            for i, sentence in enumerate(sentences):
+            # Score sentences by importance
+            scored = []
+            for i, s in enumerate(sentences):
                 score = 0
-                lower = sentence.lower()
+                lower = s.lower()
                 
-                # Position weight: first and last sentences are important
-                if i < 3:
-                    score += 3
-                elif i >= len(sentences) - 2:
-                    score += 2
+                # Position
+                if i < 2: score += 2
+                if i >= len(sentences) - 2: score += 1
                 
-                # Content weight
-                if any(w in lower for w in ['announce', 'launch', 'new', 'decision', 'approve']):
-                    score += 5
-                if any(w in lower for w in ['ipacquisition', 'partnership', 'merger']):
-                    score += 5
-                if re.search(r'\$\d|revenue|profit|earnings|financial', lower):
+                # Content importance
+                if any(w in lower for w in ['announce', 'launch', 'iposub', 'acquisition', 'merger']):
+                    score += 6
+                if re.search(r'\$\d|revenue|profit|earnings|financial|forecast', lower):
                     score += 4
-                if any(w in lower for w in ['forecast', 'expect', 'project', 'plan', 'target']):
+                if any(w in lower for w in ['growth', 'strategy', 'plan', 'target', 'outlook']):
                     score += 3
                 if any(w in lower for w in ['thank', 'conclude', 'look forward']):
-                    score += 1
+                    score += 0  # low priority
                 
-                scored_sentences.append((score, i, sentence))
+                scored.append((score, i, s))
             
-            # Sort by score, then by position for ties
-            scored_sentences.sort(key=lambda x: (-x[0], x[1]))
+            # Take top 2 sentences, preserve order
+            top = sorted(scored, key=lambda x: -x[0])[:2]
+            top.sort(key=lambda x: x[1])
             
-            # Take top 3 sentences, re-order by original position
-            selected = sorted(scored_sentences[:3], key=lambda x: x[1])
-            
-            summary = ". ".join(s[2] for s in selected)
-            
+            summary = ". ".join(s[2] for s in top)
             if not summary.endswith('.'):
                 summary += "."
             
@@ -437,84 +429,56 @@ Format each task as:
             return "Sentiment: Neutral"
     
     def identify_key_topics(self, text):
-        """Extract semantic key topics using noun phrases and bigrams"""
+        """Extract semantic key topics as noun phrases"""
         try:
-            # Stop words for business/financial content
-            stop_words = {
-                'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 
-                'day', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 
-                'did', 'its', 'let', 'put', 'say', 'she', 'too', 'use', 'that', 'with', 'have', 'this', 'will', 'your', 
-                'from', 'they', 'know', 'want', 'been', 'good', 'much', 'some', 'time', 'very', 'when', 'come', 'here', 
-                'just', 'like', 'long', 'make', 'many', 'over', 'such', 'take', 'than', 'them', 'well', 'were', 'what', 
-                'would', 'there', 'could', 'other', 'after', 'first', 'never', 'these', 'think', 'where', 'being', 
-                'every', 'great', 'might', 'shall', 'still', 'those', 'under', 'while', 'again', 'before', 'right', 
-                'about', 'also', 'back', 'call', 'came', 'each', 'even', 'going', 'look', 'most', 'move', 'need', 
-                'only', 'said', 'same', 'show', 'tell', 'turn', 'ways', 'went', 'work', 'year', 'meeting', 'thank'
-            }
+            # Define known business/financial noun phrases to look for
+            topic_patterns = [
+                (r'\b(ipo|initial public offering)\b', 'IPO'),
+                (r'\b(pay\s*plus|payplus)\b', 'PayPlus'),
+                (r'\b(revenue|revenues)\b', 'Revenue'),
+                (r'\b(blockchain\s+solutions?)\b', 'Blockchain Solutions'),
+                (r'\b(predictive\s+analytics?)\b', 'Predictive Analytics'),
+                (r'\b(growth\s+strategies?)\b', 'Growth Strategy'),
+                (r'\b(risk\s+management?)\b', 'Risk Management'),
+                (r'\b(capital\s+ratio)\b', 'Capital Ratio'),
+                (r'\b(leverage)\b', 'Leverage'),
+                (r'\b(liquidity)\b', 'Liquidity'),
+                (r'\b(shareholders?)\b', 'Shareholders'),
+                (r'\b(trading\s+day)\b', 'Trading'),
+                (r'\b(forecast)\b', 'Forecast'),
+                (r'\b(fintech|fin\s*tech)\b', 'FinTech'),
+                (r'\b(growth)\b', 'Growth'),
+                (r'\b(ai|artificial\s+intelligence)\b', 'AI'),
+            ]
             
-            # Extract words (4+ chars)
-            words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
-            
-            # Extract bigrams (2-word phrases)
-            words_list = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-            bigrams = []
-            for i in range(len(words_list) - 1):
-                if words_list[i] not in stop_words and words_list[i+1] not in stop_words:
-                    bigrams.append(f"{words_list[i]} {words_list[i+1]}")
-            
-            # Count single words
-            word_count = {}
-            for word in words:
-                if word not in stop_words and len(word) > 3:
-                    word_count[word] = word_count.get(word, 0) + 1
-            
-            # Count bigrams
-            bigram_count = {}
-            for bigram in bigrams:
-                if bigram not in bigram_count:
-                    bigram_count[bigram] = 0
-                bigram_count[bigram] += 1
-            
-            # Score: prefer bigrams, then high-frequency words
             topics = []
+            text_lower = text.lower()
             
-            # Add top bigrams (2-word phrases)
-            top_bigrams = sorted(bigram_count.items(), key=lambda x: x[1], reverse=True)[:10]
-            for bigram, count in top_bigrams:
-                if count >= 2 and len(topics) < 5:
-                    topics.append(f"• {bigram.title()} (mentioned {count} times)")
+            for pattern, label in topic_patterns:
+                if re.search(pattern, text_lower):
+                    if label not in topics:
+                        topics.append(label)
+                    if len(topics) >= 6:
+                        break
             
-            # Add top single words (even count=1 for important content words)
-            if len(topics) < 5:
-                top_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:15]
-                for word, count in top_words:
-                    if len(topics) < 7:
-                        topic_str = f"• {word.capitalize()} (mentioned {count} times)"
-                        # Check if word is already part of a bigram topic
-                        already_covered = any(word in t.lower() for t in topics)
-                        if not already_covered:
-                            topics.append(topic_str)
-            
-            # Fallback: if still no topics, extract key noun phrases
+            # Fallback: if no topics found, extract most common content words
             if not topics:
-                # Look for important phrases in the text
-                key_phrases = []
-                phrases_to_look = [
-                    (r'(\w+\s+solutions)', 'solutions'),
-                    (r'(predictive analytics)', 'analytics'),
-                    (r'(growth strategies)', 'strategies'),
-                    (r'(capital ratio)', 'capital'),
-                    (r'(liquidity)', 'liquidity'),
-                    (r'(shareholders)', 'shareholders'),
-                    (r'(trading day)', 'trading'),
-                    (r'(risk management)', 'risk'),
-                ]
-                for pattern, label in phrases_to_look:
-                    if re.search(pattern, text, re.IGNORECASE):
-                        key_phrases.append(f"• {label.title()}")
-                topics = key_phrases[:5]
+                stop_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was',
+                              'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'that', 'with', 'have', 'this',
+                              'will', 'your', 'from', 'they', 'know', 'want', 'been', 'good', 'much', 'some', 'time',
+                              'very', 'when', 'come', 'here', 'just', 'like', 'long', 'make', 'many', 'over', 'such',
+                              'take', 'than', 'them', 'well', 'were', 'what', 'would', 'there', 'could', 'other',
+                              'after', 'first', 'never', 'these', 'think', 'where', 'being', 'thank', 'forward',
+                              'also', 'look', 'success', 'faith', 'healthy', 'conservative', 'approach'}
+                words = re.findall(r'\b[a-zA-Z]{5,}\b', text_lower)
+                word_count = {}
+                for w in words:
+                    if w not in stop_words:
+                        word_count[w] = word_count.get(w, 0) + 1
+                top = sorted(word_count.items(), key=lambda x: -x[1])[:5]
+                topics = [w.capitalize() for w, c in top]
             
-            return "\n".join(topics[:7]) if topics else "• No significant topics identified"
+            return "\n".join(f"• {t}" for t in topics[:6])
         
         except Exception as e:
             logger.error(f"Error identifying topics: {str(e)}")
@@ -996,7 +960,7 @@ Format each task as:
         if speaker_count <= 1:
             # Single speaker - check if actions indicate no tasks
             if "No actionable tasks" in actions or "no assignments" in actions.lower():
-                task_section = f">> ACTION ITEMS\n{actions}\n\nNote: This appears to be a presentation or briefing\nwith no explicit task assignments."
+                task_section = f">> ACTION ITEMS\n{actions}"
             else:
                 task_section = f">> ACTION ITEMS\n{actions}"
         else:
