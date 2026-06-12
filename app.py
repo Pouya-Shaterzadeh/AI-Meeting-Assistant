@@ -8,6 +8,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import wave
 import struct
+import json
+import hashlib
+import math
 
 # Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
 import gradio_client.utils as _gc_utils
@@ -58,6 +61,15 @@ class MeetingAssistant:
     SUM_MODEL = "philschmid/bart-large-cnn-samsum"
     SENT_MODEL = "j-hartmann/emotion-english-distilroberta-base"
     LLM_MODEL = "microsoft/Phi-3-mini-4k-instruct"
+    
+    # Chunked processing constants
+    CHUNK_DURATION = 30  # seconds per audio chunk
+    CHUNK_OVERLAP = 5    # seconds overlap between chunks
+    MAX_AUDIO_DURATION = 3600  # 60 minutes max
+    CHECKPOINT_DIR = "/tmp/meeting_assistant_checkpoints"
+    
+    # Diarization model (optional — requires pyannote.audio)
+    DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 
     def __init__(self):
         """Initialize HF Inference client and prompt templates"""
@@ -421,7 +433,7 @@ class MeetingAssistant:
             return "• Error analyzing topics"
     
     def process_meeting_simple(self, audio_file, progress=None):
-        """Process meeting audio via HF Inference API (serverless pipeline)"""
+        """Process meeting audio via HF Inference API with chunked processing for long audio"""
         if audio_file is None:
             return "", None
         
@@ -430,44 +442,75 @@ class MeetingAssistant:
         try:
             logger.info("🚀 Starting meeting processing via HF Inference API...")
             
-            if progress is not None:
+            if not self.client:
+                return "HF_TOKEN not configured. Set your Hugging Face read token in the Space settings.", None
+            
+            # Get audio duration
+            duration = self._get_audio_duration(audio_file)
+            is_long_audio = duration > self.CHUNK_DURATION * 2
+            
+            if is_long_audio:
+                logger.info(f"⚡ Long audio detected ({duration:.1f}s), using chunked processing")
+            
+            # Step 1: Transcription
+            if progress:
                 progress(0.1, desc="Transcribing audio...")
             
-            # Step 1: Transcription (whisper-large-v3-turbo via API)
-            transcription, _ = self.transcribe_audio(audio_file)
-            if transcription.startswith("Error") or transcription.startswith("HF_TOKEN") or "unavailable" in transcription:
-                return transcription, None
+            if is_long_audio:
+                transcription = self._chunked_transcription(audio_file, progress)
+            else:
+                result = self.client.automatic_speech_recognition(
+                    audio_file,
+                    model=self.ASR_MODEL
+                )
+                transcription = result.get("text", "")
+            
+            if not transcription:
+                return "No speech detected in the audio file.", None
             
             transcript_time = time.time() - start_time
             logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
             
-            if progress is not None:
+            # Step 2: Analysis
+            if progress:
                 progress(0.3, desc="Running parallel analysis...")
             
-            # Step 2: Analysis (all via API, fallback to local methods on failure)
-            # Run all independent analysis calls in parallel via ThreadPoolExecutor
             analysis_start = time.time()
             
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                fut_summary = executor.submit(self.summarize_text, transcription)
-                fut_actions = executor.submit(self.extract_action_items, transcription)
-                fut_sentiment = executor.submit(self.analyze_sentiment, transcription)
-                fut_topics = executor.submit(self.identify_key_topics, transcription)
+            # Use map-reduce for long transcripts, parallel for short
+            if is_long_audio and len(transcription) > 3000:
+                # Long transcript - use map-reduce summarization
+                summary = self._map_reduce_summarize(transcription, progress)
+                sentiment = self._segmented_sentiment(transcription, progress)
                 
-                summary = fut_summary.result()
-                action_items = fut_actions.result()
-                sentiment = fut_sentiment.result()
-                key_topics = fut_topics.result()
+                # Run action items and topics in parallel
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    fut_actions = executor.submit(self.extract_action_items, transcription)
+                    fut_topics = executor.submit(self.identify_key_topics, transcription)
+                    action_items = fut_actions.result()
+                    key_topics = fut_topics.result()
+            else:
+                # Short transcript - run all in parallel
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    fut_summary = executor.submit(self.summarize_text, transcription)
+                    fut_actions = executor.submit(self.extract_action_items, transcription)
+                    fut_sentiment = executor.submit(self.analyze_sentiment, transcription)
+                    fut_topics = executor.submit(self.identify_key_topics, transcription)
+                    
+                    summary = fut_summary.result()
+                    action_items = fut_actions.result()
+                    sentiment = fut_sentiment.result()
+                    key_topics = fut_topics.result()
             
             analysis_time = time.time() - analysis_start
             logger.info(f"⚡ Analysis completed in {analysis_time:.2f}s")
             
-            if progress is not None:
+            if progress:
                 progress(0.85, desc="Generating report...")
             
             # Step 3: Generate comprehensive report
             meeting_minutes = self._generate_meeting_report(
-                transcription, summary, action_items, sentiment, key_topics
+                transcription, summary, action_items, sentiment, key_topics, duration
             )
             
             total_time = time.time() - start_time
@@ -485,12 +528,337 @@ class MeetingAssistant:
             logger.error(error_msg)
             return error_msg, None
     
-    def _generate_meeting_report(self, transcript, summary, actions, sentiment, topics):
+    def _get_audio_duration(self, audio_path):
+        """Get audio duration in seconds using wave module"""
+        try:
+            with wave.open(audio_path, 'rb') as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                duration = frames / float(rate)
+                return duration
+        except Exception as e:
+            logger.warning(f"Could not get audio duration: {e}")
+            return 0
+    
+    def _compress_audio(self, audio_path, output_path=None):
+        """Compress audio to 16kHz mono WAV for faster processing"""
+        try:
+            import torch
+            import torchaudio
+            
+            if output_path is None:
+                output_path = tempfile.mktemp(suffix='.wav')
+            
+            waveform, sample_rate = torchaudio.load(audio_path)
+            
+            # Convert to mono if stereo
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            # Resample to 16kHz if needed
+            if sample_rate != 16000:
+                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+                waveform = resampler(waveform)
+                sample_rate = 16000
+            
+            # Normalize audio
+            waveform = waveform / (waveform.abs().max() + 1e-8)
+            
+            torchaudio.save(output_path, waveform, sample_rate)
+            logger.info(f"✅ Audio compressed to {output_path}")
+            return output_path
+        except ImportError:
+            logger.warning("⚠️ torch/torchaudio not available, skipping compression")
+            return audio_path
+        except Exception as e:
+            logger.warning(f"⚠️ Audio compression failed: {e}")
+            return audio_path
+    
+    def _create_audio_chunks(self, audio_path, chunk_duration=None, overlap=None):
+        """Split audio into overlapping chunks for processing"""
+        try:
+            import torch
+            import torchaudio
+            
+            if chunk_duration is None:
+                chunk_duration = self.CHUNK_DURATION
+            if overlap is None:
+                overlap = self.CHUNK_OVERLAP
+            
+            waveform, sample_rate = torchaudio.load(audio_path)
+            total_samples = waveform.shape[1]
+            chunk_samples = int(chunk_duration * sample_rate)
+            overlap_samples = int(overlap * sample_rate)
+            step_samples = chunk_samples - overlap_samples
+            
+            chunks = []
+            chunk_dir = tempfile.mkdtemp(prefix='meeting_chunks_')
+            
+            start = 0
+            chunk_idx = 0
+            
+            while start < total_samples:
+                end = min(start + chunk_samples, total_samples)
+                chunk_waveform = waveform[:, start:end]
+                
+                chunk_path = os.path.join(chunk_dir, f'chunk_{chunk_idx:04d}.wav')
+                torchaudio.save(chunk_path, chunk_waveform, sample_rate)
+                
+                chunks.append({
+                    'path': chunk_path,
+                    'start_time': start / sample_rate,
+                    'end_time': end / sample_rate,
+                    'index': chunk_idx
+                })
+                
+                chunk_idx += 1
+                start += step_samples
+                
+                # Stop if we've reached the end
+                if end >= total_samples:
+                    break
+            
+            logger.info(f"✅ Created {len(chunks)} audio chunks")
+            return chunks, chunk_dir
+        except ImportError:
+            logger.warning("⚠️ torch/torchaudio not available for chunking")
+            return [{'path': audio_path, 'start_time': 0, 'end_time': 0, 'index': 0}], None
+        except Exception as e:
+            logger.warning(f"⚠️ Audio chunking failed: {e}")
+            return [{'path': audio_path, 'start_time': 0, 'end_time': 0, 'index': 0}], None
+    
+    def _perform_diarization(self, audio_path):
+        """Perform speaker diarization using pyannote.audio (optional)"""
+        try:
+            from pyannote.audio import Pipeline
+            import torch
+            
+            if not self.hf_token:
+                logger.warning("⚠️ HF_TOKEN required for diarization")
+                return None
+            
+            logger.info("⚡ Performing speaker diarization...")
+            pipeline = Pipeline.from_pretrained(
+                self.DIARIZATION_MODEL,
+                use_auth_token=self.hf_token
+            )
+            
+            # Move to GPU if available
+            if torch.cuda.is_available():
+                pipeline = pipeline.to(torch.device("cuda"))
+            
+            diarization = pipeline(audio_path)
+            
+            # Convert to list of (start, end, speaker) tuples
+            segments = []
+            for turn, _, speaker in diarization.itertracks(yield_label=True):
+                segments.append({
+                    'start': turn.start,
+                    'end': turn.end,
+                    'speaker': speaker
+                })
+            
+            logger.info(f"✅ Diarization completed: {len(segments)} segments")
+            return segments
+        except ImportError:
+            logger.warning("⚠️ pyannote.audio not available for diarization")
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ Diarization failed: {e}")
+            return None
+    
+    def _chunked_transcription(self, audio_path, progress=None):
+        """Transcribe audio in chunks for long meetings"""
+        try:
+            # Check if audio needs chunking
+            duration = self._get_audio_duration(audio_path)
+            logger.info(f"📊 Audio duration: {duration:.1f}s")
+            
+            if duration <= self.CHUNK_DURATION * 2:
+                # Short audio - transcribe directly
+                if progress:
+                    progress(0.15, desc="Transcribing audio...")
+                result = self.client.automatic_speech_recognition(
+                    audio_path,
+                    model=self.ASR_MODEL
+                )
+                return result.get("text", "")
+            
+            # Long audio - chunk and transcribe
+            logger.info(f"⚡ Long audio detected ({duration:.1f}s), using chunked transcription")
+            chunks, chunk_dir = self._create_audio_chunks(audio_path)
+            
+            transcriptions = []
+            for i, chunk in enumerate(chunks):
+                if progress:
+                    progress_val = 0.1 + (0.2 * (i / len(chunks)))
+                    progress(progress_val, desc=f"Transcribing chunk {i+1}/{len(chunks)}...")
+                
+                logger.info(f"⚡ Transcribing chunk {i+1}/{len(chunks)} ({chunk['start_time']:.1f}s - {chunk['end_time']:.1f}s)")
+                
+                result = self.client.automatic_speech_recognition(
+                    chunk['path'],
+                    model=self.ASR_MODEL
+                )
+                chunk_text = result.get("text", "")
+                if chunk_text:
+                    transcriptions.append(chunk_text)
+            
+            # Clean up chunk directory
+            if chunk_dir and os.path.exists(chunk_dir):
+                import shutil
+                shutil.rmtree(chunk_dir, ignore_errors=True)
+            
+            # Combine transcriptions with overlap handling
+            full_transcript = " ".join(transcriptions)
+            
+            # Remove duplicate sentences from overlap
+            sentences = re.split(r'(?<=[.!?])\s+', full_transcript)
+            unique_sentences = []
+            seen = set()
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if sentence and sentence not in seen:
+                    seen.add(sentence)
+                    unique_sentences.append(sentence)
+            
+            return " ".join(unique_sentences)
+        except Exception as e:
+            logger.error(f"Error in chunked transcription: {e}")
+            raise
+    
+    def _map_reduce_summarize(self, text, progress=None):
+        """Map-reduce summarization for long transcripts"""
+        try:
+            # Split text into chunks for summarization
+            max_chunk_size = 1000  # tokens approx
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            
+            chunks = []
+            current_chunk = []
+            current_size = 0
+            
+            for sentence in sentences:
+                sentence_tokens = len(sentence.split())
+                if current_size + sentence_tokens > max_chunk_size and current_chunk:
+                    chunks.append(" ".join(current_chunk))
+                    current_chunk = [sentence]
+                    current_size = sentence_tokens
+                else:
+                    current_chunk.append(sentence)
+                    current_size += sentence_tokens
+            
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+            
+            if len(chunks) <= 1:
+                # Short text - summarize directly
+                return self.summarize_text(text)
+            
+            # Map phase: summarize each chunk
+            chunk_summaries = []
+            for i, chunk in enumerate(chunks):
+                if progress:
+                    progress_val = 0.3 + (0.4 * (i / len(chunks)))
+                    progress(progress_val, desc=f"Summarizing chunk {i+1}/{len(chunks)}...")
+                
+                summary = self.summarize_text(chunk)
+                chunk_summaries.append(summary)
+            
+            # Reduce phase: combine summaries
+            combined_summaries = "\n".join(chunk_summaries)
+            
+            # Final summary
+            if progress:
+                progress(0.7, desc="Generating final summary...")
+            
+            final_summary = self.summarize_text(combined_summaries)
+            return final_summary
+        except Exception as e:
+            logger.warning(f"Map-reduce summarization failed: {e}")
+            return self.enhanced_fallback_summary(text)
+    
+    def _segmented_sentiment(self, text, progress=None):
+        """Sentiment analysis segmented by speaker or time"""
+        try:
+            # Split text into segments (by paragraphs or sentences)
+            segments = re.split(r'\n\n+', text)
+            if len(segments) <= 1:
+                segments = re.split(r'(?<=[.!?])\s+', text)
+            
+            # Analyze each segment
+            segment_sentiments = []
+            for i, segment in enumerate(segments):
+                if len(segment.strip()) < 20:
+                    continue
+                
+                if progress and i % 5 == 0:
+                    progress_val = 0.7 + (0.15 * (i / len(segments)))
+                    progress(progress_val, desc=f"Analyzing sentiment {i+1}/{len(segments)}...")
+                
+                sentiment = self.analyze_sentiment(segment)
+                segment_sentiments.append({
+                    'segment': segment[:100] + "..." if len(segment) > 100 else segment,
+                    'sentiment': sentiment
+                })
+            
+            # Aggregate sentiments
+            if not segment_sentiments:
+                return self.analyze_sentiment(text)
+            
+            # Count emotion occurrences
+            emotion_counts = {}
+            for seg in segment_sentiments:
+                # Extract emotion from sentiment string
+                emotion_match = re.search(r'Primary Emotion: (\w+)', seg['sentiment'])
+                if emotion_match:
+                    emotion = emotion_match.group(1)
+                    emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
+            
+            # Build aggregated result
+            if emotion_counts:
+                total = sum(emotion_counts.values())
+                top_emotions = sorted(emotion_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                emotion_str = ", ".join([f"{e}: {c/total*100:.1f}%" for e, c in top_emotions])
+                return f"Overall Sentiment: {emotion_str} (Based on {len(segment_sentiments)} segments)"
+            else:
+                return segment_sentiments[0]['sentiment'] if segment_sentiments else self.analyze_sentiment(text)
+        except Exception as e:
+            logger.warning(f"Segmented sentiment failed: {e}")
+            return self.analyze_sentiment(text)
+    
+    def _save_checkpoint(self, job_id, data):
+        """Save processing checkpoint"""
+        try:
+            os.makedirs(self.CHECKPOINT_DIR, exist_ok=True)
+            checkpoint_path = os.path.join(self.CHECKPOINT_DIR, f"{job_id}.json")
+            with open(checkpoint_path, 'w') as f:
+                json.dump(data, f)
+            logger.info(f"💾 Checkpoint saved: {checkpoint_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not save checkpoint: {e}")
+    
+    def _load_checkpoint(self, job_id):
+        """Load processing checkpoint"""
+        try:
+            checkpoint_path = os.path.join(self.CHECKPOINT_DIR, f"{job_id}.json")
+            if os.path.exists(checkpoint_path):
+                with open(checkpoint_path, 'r') as f:
+                    data = json.load(f)
+                logger.info(f"📂 Checkpoint loaded: {checkpoint_path}")
+                return data
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load checkpoint: {e}")
+        return None
+    
+    def _generate_meeting_report(self, transcript, summary, actions, sentiment, topics, duration=None):
         """Generate meeting report with brutalist terminal formatting"""
         sep = "=" * 52
+        duration_str = f"\n>> DURATION\n{duration:.1f} seconds ({duration/60:.1f} minutes)" if duration else ""
         return f"""{sep}
                   MEETING ANALYSIS REPORT
 {sep}
+{duration_str}
 
 >> SUMMARY
 {summary}
@@ -512,6 +880,23 @@ class MeetingAssistant:
 def process_meeting_audio(audio_file, progress=gr.Progress()):
     if audio_file is None:
         return "Please upload an audio file to analyze.", None
+    
+    # Validate audio duration
+    try:
+        with wave.open(audio_file, 'rb') as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            duration = frames / float(rate)
+            
+            if duration > meeting_assistant.MAX_AUDIO_DURATION:
+                return f"Error: Audio file too long ({duration:.1f}s). Maximum allowed duration is {meeting_assistant.MAX_AUDIO_DURATION/60:.0f} minutes.", None
+            
+            if duration < 1.0:
+                return "Error: Audio file too short. Please upload a longer audio file.", None
+            
+            logger.info(f"📊 Audio file duration: {duration:.1f}s ({duration/60:.1f} minutes)")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not validate audio duration: {e}")
 
     meeting_report, temp_file = meeting_assistant.process_meeting_simple(audio_file, progress=progress)
 
@@ -650,6 +1035,10 @@ function() {
                 && ta.value.indexOf('Error') !== 0
                 && ta.value.indexOf('Please upload') !== 0) {
                 window.__uploadStatus.set('complete', 'PROCESSING COMPLETE');
+                var indicator = document.getElementById('processing-indicator');
+                if (indicator) {
+                    indicator.classList.remove('active');
+                }
                 setTimeout(function() { window.__uploadStatus.set('', 'AWAITING INPUT'); }, 3500);
             }
         });
@@ -1144,6 +1533,64 @@ button,.gr-button{
 /* ═══ PROCESSING STATE ═══ */
 #btn-submit:disabled{opacity:0.5!important;cursor:not-allowed!important;animation:pulse 1.5s ease-in-out infinite!important}
 
+/* ═══ LONG AUDIO PROCESSING ═══ */
+.processing-indicator{
+    display:none;
+    align-items:center;
+    gap:0.5rem;
+    padding:0.6rem 0.85rem;
+    margin-bottom:0.85rem;
+    background:rgba(255,107,53,0.08);
+    border:1px solid var(--acc);
+    font-family:var(--fm);
+    font-size:0.65rem;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--acc);
+    animation:statusPulse 1s ease-in-out infinite;
+}
+.processing-indicator.active{
+    display:flex;
+}
+.processing-indicator .progress-bar{
+    flex:1;
+    height:2px;
+    background:var(--bdr);
+    position:relative;
+    overflow:hidden;
+}
+.processing-indicator .progress-bar::after{
+    content:'';
+    position:absolute;
+    top:0;left:0;
+    width:30%;
+    height:100%;
+    background:var(--acc);
+    animation:progressSlide 1.5s ease-in-out infinite;
+}
+@keyframes progressSlide{
+    0%{left:-30%}
+    100%{left:130%}
+}
+
+/* ═══ AUDIO INFO ═══ */
+.audio-info{
+    font-family:var(--fm);
+    font-size:0.6rem;
+    color:var(--txt3);
+    margin-top:0.5rem;
+    padding:0.4rem;
+    background:var(--bg);
+    border:1px solid var(--bdr);
+}
+.audio-info .duration{
+    color:var(--txt2);
+}
+.audio-info .chunk-info{
+    color:var(--acc);
+    margin-top:0.2rem;
+}
+
 /* ═══ ANIMATIONS ═══ */
 @keyframes dotPulse{0%,100%{opacity:0.3;transform:scale(0.8)}50%{opacity:1;transform:scale(1.2)}}
 @keyframes arrowBlink{0%,100%{opacity:0.3}50%{opacity:1}}
@@ -1194,7 +1641,7 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
             </div>
             <div class="header-rule"></div>
             <p class="header-desc">
-                UPLOAD MEETING AUDIO &mdash; RECEIVE <strong>TRANSCRIPTION</strong>,
+                UPLOAD MEETING AUDIO (UP TO 60 MINUTES) &mdash; RECEIVE <strong>TRANSCRIPTION</strong>,
                 <strong>SUMMARY</strong>, <strong>TASK LIST</strong>
                 &amp; <strong>SENTIMENT ANALYSIS</strong>
             </p>
@@ -1210,6 +1657,12 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
                 gr.HTML("""<div id="upload-status" class="upload-status">
                     <span class="status-dot"></span>
                     <span class="status-text">AWAITING INPUT</span>
+                </div>""")
+                
+                gr.HTML("""<div id="processing-indicator" class="processing-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">PROCESSING...</span>
+                    <div class="progress-bar"></div>
                 </div>""")
                 
                 audio_input = gr.Audio(
@@ -1267,6 +1720,10 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
                 var hasAudio = audioEl && audioEl.src && audioEl.src !== window.location.href;
                 if (hasAudio && window.__uploadStatus) {
                     window.__uploadStatus.set('processing', 'PROCESSING...');
+                    var indicator = document.getElementById('processing-indicator');
+                    if (indicator) {
+                        indicator.classList.add('active');
+                    }
                 }
                 return args;
             }
@@ -1276,7 +1733,16 @@ body.loaded .header-desc{animation:fadeInUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
         clear_btn.click(
             fn=clear_interface,
             inputs=[],
-            outputs=[audio_input, output_display, download_file]
+            outputs=[audio_input, output_display, download_file],
+            js="""
+            function() {
+                var indicator = document.getElementById('processing-indicator');
+                if (indicator) {
+                    indicator.classList.remove('active');
+                }
+                return [];
+            }
+            """
         )
         
         # ═══════════════════════════════════════════
