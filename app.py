@@ -1295,6 +1295,7 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
     line-height:1.8;
     max-width:600px;
     margin:0 auto;
+    text-align:center;
 }
 .header-desc strong{color:var(--txt2);font-weight:500}
 
