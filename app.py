@@ -68,8 +68,7 @@ class MeetingAssistant:
     MAX_AUDIO_DURATION = 3600  # 60 minutes max
     CHECKPOINT_DIR = "/tmp/meeting_assistant_checkpoints"
     
-    # Diarization model (optional — requires pyannote.audio)
-    DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+
 
     def __init__(self):
         """Initialize HF Inference client and prompt templates"""
@@ -576,20 +575,9 @@ EXAMPLE OUTPUT:
             transcript_time = time.time() - start_time
             logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
             
-            # Step 1.5: Speaker Diarization
-            if progress is not None:
-                progress(0.25, desc="Analyzing speakers...")
-            
-            diarization = self._perform_diarization(audio_file)
-            if diarization:
-                unique_speakers = set(s['speaker'] for s in diarization)
-                speaker_count = len(unique_speakers)
-                is_single_speaker = speaker_count <= 1
-                logger.info(f"🎤 Diarization: {speaker_count} speaker(s) detected")
-            else:
-                speaker_count = 1
-                is_single_speaker = True
-                logger.info("🎤 Diarization skipped — defaulting to single speaker")
+            # Step 1.5: Speaker count (default — no diarization)
+            speaker_count = 1
+            is_single_speaker = True
             
             # Step 2: Analysis
             if progress is not None:
@@ -753,47 +741,6 @@ EXAMPLE OUTPUT:
         except Exception as e:
             logger.warning(f"⚠️ Audio chunking failed: {e}")
             return [{'path': audio_path, 'start_time': 0, 'end_time': 0, 'index': 0}], None
-    
-    def _perform_diarization(self, audio_path):
-        """Perform speaker diarization using pyannote.audio (optional)"""
-        try:
-            from pyannote.audio import Pipeline
-            import torch
-            
-            if not self.hf_token:
-                logger.warning("⚠️ HF_TOKEN required for diarization")
-                return None
-            
-            logger.info("⚡ Performing speaker diarization...")
-            pipeline = Pipeline.from_pretrained(
-                self.DIARIZATION_MODEL,
-                token=self.hf_token
-            )
-            
-            # Move to GPU if available
-            if torch.cuda.is_available():
-                pipeline = pipeline.to(torch.device("cuda"))
-            
-            result = pipeline(audio_path)
-            annotation = result.annotation if hasattr(result, 'annotation') else result
-            
-            # Convert to list of (start, end, speaker) tuples
-            segments = []
-            for turn, _, speaker in annotation.itertracks(yield_label=True):
-                segments.append({
-                    'start': turn.start,
-                    'end': turn.end,
-                    'speaker': speaker
-                })
-            
-            logger.info(f"✅ Diarization completed: {len(segments)} segments")
-            return segments
-        except ImportError:
-            logger.warning("⚠️ pyannote.audio not available for diarization")
-            return None
-        except Exception as e:
-            logger.warning(f"⚠️ Diarization failed: {e}")
-            return None
     
     def _chunked_transcription(self, audio_path, progress=None):
         """Transcribe audio in chunks for long meetings"""
