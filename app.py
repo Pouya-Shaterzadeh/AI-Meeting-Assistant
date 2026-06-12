@@ -334,77 +334,47 @@ Format each task as:
             sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
             
             if not sentences:
-                return text[:300] + "..." if len(text) > 300 else text
+                return text[:200] + "..." if len(text) > 200 else text
             
-            # Extract key information categories
-            key_points = []
+            # Strategy: pick the 3-4 most important sentences
+            scored_sentences = []
             
-            # 1. Financial figures (highest priority for business meetings)
-            financial_pattern = r'\$?\d+[\d,.]*\s*(?:million|billion|%|percent|dollars)'
-            financial_matches = re.findall(financial_pattern, text, re.IGNORECASE)
-            if financial_matches:
-                key_points.append(f"Financial highlights: {', '.join(financial_matches[:3])}")
+            for i, sentence in enumerate(sentences):
+                score = 0
+                lower = sentence.lower()
+                
+                # Position weight: first and last sentences are important
+                if i < 3:
+                    score += 3
+                elif i >= len(sentences) - 2:
+                    score += 2
+                
+                # Content weight
+                if any(w in lower for w in ['announce', 'launch', 'new', 'decision', 'approve']):
+                    score += 5
+                if any(w in lower for w in ['ipacquisition', 'partnership', 'merger']):
+                    score += 5
+                if re.search(r'\$\d|revenue|profit|earnings|financial', lower):
+                    score += 4
+                if any(w in lower for w in ['forecast', 'expect', 'project', 'plan', 'target']):
+                    score += 3
+                if any(w in lower for w in ['thank', 'conclude', 'look forward']):
+                    score += 1
+                
+                scored_sentences.append((score, i, sentence))
             
-            # 2. Key announcements/decisions
-            announcement_words = ['announce', 'launch', 'new', 'decision', 'approve', 'strategy', 'acquisition', 'IPO', 'partnership']
-            for sentence in sentences[:20]:
-                if any(word in sentence.lower() for word in announcement_words):
-                    key_points.append(sentence)
-                    if len(key_points) >= 3:
-                        break
+            # Sort by score, then by position for ties
+            scored_sentences.sort(key=lambda x: (-x[0], x[1]))
             
-            # 3. Outlook/future direction
-            outlook_words = ['forecast', 'expect', 'project', 'plan', 'future', 'outlook', 'target', 'goal']
-            for sentence in sentences:
-                if any(word in sentence.lower() for word in outlook_words):
-                    key_points.append(sentence)
-                    if len(key_points) >= 4:
-                        break
+            # Take top 3 sentences, re-order by original position
+            selected = sorted(scored_sentences[:3], key=lambda x: x[1])
             
-            # 4. Closing statement
-            closing_words = ['thank', 'appreciate', 'look forward', 'conclusion']
-            for sentence in reversed(sentences[-5:]):
-                if any(word in sentence.lower() for word in closing_words):
-                    key_points.append(sentence)
-                    break
+            summary = ". ".join(s[2] for s in selected)
             
-            # If we didn't find enough structured points, use first/last sentences
-            if len(key_points) < 3:
-                key_points = []
-                # First substantial sentence (introduction)
-                for sentence in sentences[:5]:
-                    if len(sentence) > 30:
-                        key_points.append(sentence)
-                        break
-                # Middle content
-                mid_start = len(sentences) // 3
-                for sentence in sentences[mid_start:mid_start+5]:
-                    if len(sentence) > 30:
-                        key_points.append(sentence)
-                        break
-                # Last substantial sentence (conclusion)
-                for sentence in reversed(sentences[-5:]):
-                    if len(sentence) > 30:
-                        key_points.append(sentence)
-                        break
+            if not summary.endswith('.'):
+                summary += "."
             
-            # Deduplicate while preserving order
-            seen = set()
-            unique_points = []
-            for point in key_points:
-                point_lower = point.lower()
-                if point_lower not in seen:
-                    seen.add(point_lower)
-                    unique_points.append(point)
-            
-            # Limit to 4-5 sentences max
-            final_summary = ". ".join(unique_points[:5])
-            
-            # Clean up
-            if not final_summary.endswith('.'):
-                final_summary += "."
-            
-            return final_summary
+            return summary
         except Exception as e:
             logger.error(f"Error in concise summary: {str(e)}")
             return "Summary not available."
@@ -469,7 +439,7 @@ Format each task as:
     def identify_key_topics(self, text):
         """Extract semantic key topics using noun phrases and bigrams"""
         try:
-            # Enhanced stop words for business/financial content
+            # Stop words for business/financial content
             stop_words = {
                 'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 
                 'day', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 
@@ -479,11 +449,7 @@ Format each task as:
                 'would', 'there', 'could', 'other', 'after', 'first', 'never', 'these', 'think', 'where', 'being', 
                 'every', 'great', 'might', 'shall', 'still', 'those', 'under', 'while', 'again', 'before', 'right', 
                 'about', 'also', 'back', 'call', 'came', 'each', 'even', 'going', 'look', 'most', 'move', 'need', 
-                'only', 'said', 'same', 'show', 'tell', 'turn', 'ways', 'went', 'work', 'year', 'meeting',
-                # Additional business stop words
-                'quarter', 'million', 'billion', 'percent', 'expect', 'drive', 'primarily', 'also', 'thank',
-                'look', 'forward', 'success', 'faith', 'adopted', 'approach', 'manage', 'healthy', 'level',
-                'indicate', 'exceed', 'confidence', 'conservative', 'bolstering', 'paving', 'aggressive'
+                'only', 'said', 'same', 'show', 'tell', 'turn', 'ways', 'went', 'work', 'year', 'meeting', 'thank'
             }
             
             # Extract words (4+ chars)
@@ -512,27 +478,41 @@ Format each task as:
             # Score: prefer bigrams, then high-frequency words
             topics = []
             
-            # Add top bigrams (2-word phrases) with count >= 2
-            top_bigrams = sorted(bigram_count.items(), key=lambda x: x[1], reverse=True)[:5]
+            # Add top bigrams (2-word phrases)
+            top_bigrams = sorted(bigram_count.items(), key=lambda x: x[1], reverse=True)[:10]
             for bigram, count in top_bigrams:
-                if count >= 2:
+                if count >= 2 and len(topics) < 5:
                     topics.append(f"• {bigram.title()} (mentioned {count} times)")
             
-            # Add top single words with count >= 2 (if we need more)
+            # Add top single words (even count=1 for important content words)
             if len(topics) < 5:
-                top_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:10]
+                top_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:15]
                 for word, count in top_words:
-                    if count >= 2 and len(topics) < 7:
+                    if len(topics) < 7:
                         topic_str = f"• {word.capitalize()} (mentioned {count} times)"
                         # Check if word is already part of a bigram topic
                         already_covered = any(word in t.lower() for t in topics)
                         if not already_covered:
                             topics.append(topic_str)
             
-            # If no high-frequency topics, return first few unique content words
+            # Fallback: if still no topics, extract key noun phrases
             if not topics:
-                content_words = [w for w, c in sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:10]]
-                topics = [f"• {w.capitalize()}" for w in content_words[:5]]
+                # Look for important phrases in the text
+                key_phrases = []
+                phrases_to_look = [
+                    (r'(\w+\s+solutions)', 'solutions'),
+                    (r'(predictive analytics)', 'analytics'),
+                    (r'(growth strategies)', 'strategies'),
+                    (r'(capital ratio)', 'capital'),
+                    (r'(liquidity)', 'liquidity'),
+                    (r'(shareholders)', 'shareholders'),
+                    (r'(trading day)', 'trading'),
+                    (r'(risk management)', 'risk'),
+                ]
+                for pattern, label in phrases_to_look:
+                    if re.search(pattern, text, re.IGNORECASE):
+                        key_phrases.append(f"• {label.title()}")
+                topics = key_phrases[:5]
             
             return "\n".join(topics[:7]) if topics else "• No significant topics identified"
         
@@ -1009,6 +989,9 @@ Format each task as:
         else:
             meeting_type = f"MULTI-PARTICIPANT MEETING ({speaker_count} speakers)"
         
+        # Sentiment header
+        sentiment_header = "SENTIMENT"
+        
         # Task list with meeting-type awareness
         if speaker_count <= 1:
             # Single speaker - check if actions indicate no tasks
@@ -1032,7 +1015,7 @@ Format each task as:
 
 {task_section}
 
->> SPEAKER SENTIMENT
+>> {sentiment_header}
 {sentiment}
 
 >> KEY DISCUSSION POINTS
