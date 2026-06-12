@@ -175,32 +175,68 @@ class MeetingAssistant:
             logger.error(f"Error transcribing audio: {str(e)}")
             return f"Error transcribing audio: {str(e)}", []
     
-    def extract_action_items(self, text):
+    def extract_action_items(self, text, is_single_speaker=False):
         """Extract action items via LLM (Phi-3-mini) or fall back to regex"""
         try:
             if self.client:
-                return self._extract_tasks_with_llm(text)
+                return self._extract_tasks_with_llm(text, is_single_speaker)
             else:
                 return self._extract_tasks_fallback(text)
         except Exception as e:
             logger.error(f"Error extracting action items: {str(e)}")
             return self._extract_tasks_fallback(text)
 
-    def _extract_tasks_with_llm(self, text):
+    def _extract_tasks_with_llm(self, text, is_single_speaker=False):
         """Use Phi-3-mini to extract structured action items from transcript"""
         try:
+            if is_single_speaker:
+                system_prompt = """You are an expert meeting analyst specializing in single-speaker presentations and briefings.
+
+IMPORTANT RULES FOR SINGLE-SPEAKER CONTENT:
+- The speaker is presenting information, not assigning tasks to others
+- Unless the speaker explicitly says "I will..." or "We will..." or assigns a task to a named person, there are NO actionable tasks
+- Do NOT invent people, names, or assignments
+- Do NOT assume the speaker is assigning tasks just because they mention future actions
+
+If no explicit action items, commitments, or task assignments are clearly stated, return EXACTLY:
+• No actionable tasks identified — this is a presentation/briefing with no assignments
+
+Only extract tasks if the speaker explicitly:
+1. Commits to a specific action ("I will prepare the report by Friday")
+2. Assigns a task to a named person ("Sarah, please review the proposal")
+3. Makes a clear promise or commitment with a deadline
+
+Format each task as:
+• WHO: WHAT (deadline if mentioned)
+"""
+            else:
+                system_prompt = """You are an expert meeting analyst specializing in extracting actionable tasks from multi-participant meeting transcripts.
+
+Your expertise includes:
+- Identifying concrete, specific action items with clear ownership
+- Extracting deadlines, timeframes, and follow-up requirements
+- Recognizing commitments, assignments, and next steps
+- Distinguishing between decisions and actionable tasks
+- Capturing both explicit and implicit task assignments
+
+IMPORTANT: Only extract tasks that are explicitly stated in the transcript. Do not invent tasks, people, or deadlines.
+
+Format each task as:
+• WHO: WHAT (deadline if mentioned)
+"""
+            
             if LANGCHAIN_AVAILABLE and hasattr(self, 'task_extraction_template'):
                 messages = self.task_extraction_template.format_messages(
                     meeting_text=text[:4000]
                 )
                 api_messages = [
-                    {"role": "system" if m.type == "system" else "user", "content": m.content}
-                    for m in messages
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Analyze this meeting transcript and extract actionable tasks:\n\n{text[:4000]}\n\nEXTRACTED TASKS (if any):"}
                 ]
             else:
                 api_messages = [
-                    {"role": "system", "content": "You are an expert meeting analyst. Extract actionable tasks with clear ownership, deadlines, and specifics. Format each task as a bullet point starting with '•'. Include WHO, WHAT, and WHEN for each task."},
-                    {"role": "user", "content": f"Extract ALL actionable tasks from this meeting transcript:\n\n{text[:4000]}\n\nEXTRACTED TASKS:"}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Analyze this meeting transcript and extract actionable tasks:\n\n{text[:4000]}\n\nEXTRACTED TASKS (if any):"}
                 ]
 
             logger.info("⚡ Extracting action items via Phi-3-mini...")
@@ -262,19 +298,19 @@ class MeetingAssistant:
             return "• Error extracting tasks from meeting content"
     
     def summarize_text(self, text):
-        """Summarize via HF Inference API (bart-large-cnn-samsum) or fallback"""
+        """Summarize via HF Inference API (bart-large-cnn-samsum) with concise output"""
         try:
             if not self.client:
-                return self.enhanced_fallback_summary(text)
+                return self.concise_executive_summary(text)
 
             if len(text) < 100:
-                return self.enhanced_fallback_summary(text)
+                return self.concise_executive_summary(text)
 
             logger.info("⚡ Summarizing via HF Inference API (bart-large-cnn-samsum)...")
             result = self.client.summarization(
                 text,
                 model=self.SUM_MODEL,
-                parameters={"max_length": 200, "min_length": 80, "do_sample": False}
+                parameters={"max_length": 150, "min_length": 30, "do_sample": False}
             )
             if isinstance(result, dict):
                 summary = result.get("summary_text", "")
@@ -283,83 +319,99 @@ class MeetingAssistant:
             else:
                 summary = ""
             if not summary:
-                return self.enhanced_fallback_summary(text)
+                return self.concise_executive_summary(text)
             logger.info("✅ Summarization completed via API")
             return summary
 
         except Exception as e:
             logger.warning(f"API summarization failed, falling back: {e}")
-            return self.enhanced_fallback_summary(text)
+            return self.concise_executive_summary(text)
     
-    def enhanced_fallback_summary(self, text):
-        """Comprehensive fallback summarization with detailed bullet points"""
+    def concise_executive_summary(self, text):
+        """Produce 3-5 sentence executive summary for minute-taking"""
         try:
             sentences = re.split(r'[.!?]+', text)
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
             
-            # Expanded key phrases for comprehensive coverage
-            key_categories = {
-                'financial': ['revenue', 'profit', 'budget', 'cost', 'investment', 'financial', 'money', 'funding', 'quarter', 'forecast'],
-                'business': ['strategy', 'business', 'market', 'customer', 'product', 'service', 'growth', 'expansion', 'competition'],
-                'operational': ['process', 'operation', 'workflow', 'efficiency', 'performance', 'quality', 'timeline', 'deadline'],
-                'decisions': ['decision', 'approve', 'reject', 'choose', 'select', 'agree', 'disagree', 'vote', 'consensus'],
-                'updates': ['update', 'progress', 'status', 'report', 'achievement', 'milestone', 'completion', 'result'],
-                'planning': ['plan', 'strategy', 'roadmap', 'goal', 'objective', 'target', 'initiative', 'project'],
-                'issues': ['problem', 'issue', 'concern', 'risk', 'challenge', 'obstacle', 'difficulty', 'blocker'],
-                'people': ['team', 'staff', 'employee', 'hire', 'promotion', 'training', 'resource', 'department']
-            }
+            if not sentences:
+                return text[:300] + "..." if len(text) > 300 else text
             
-            categorized_points = {category: [] for category in key_categories}
-            general_points = []
+            # Extract key information categories
+            key_points = []
             
-            # Process all sentences for comprehensive coverage
-            for sentence in sentences[:50]:  # Analyze more sentences
-                sentence = sentence.strip()
-                if len(sentence) > 25:  # Slightly lower threshold
-                    sentence_lower = sentence.lower()
-                    
-                    # Categorize sentences
-                    categorized = False
-                    for category, keywords in key_categories.items():
-                        if any(keyword in sentence_lower for keyword in keywords):
-                            if len(categorized_points[category]) < 3:  # Limit per category
-                                categorized_points[category].append(sentence)
-                                categorized = True
-                                break
-                    
-                    # Add to general if not categorized and we need more content
-                    if not categorized and len(general_points) < 5:
-                        general_points.append(sentence)
+            # 1. Financial figures (highest priority for business meetings)
+            financial_pattern = r'\$?\d+[\d,.]*\s*(?:million|billion|%|percent|dollars)'
+            financial_matches = re.findall(financial_pattern, text, re.IGNORECASE)
+            if financial_matches:
+                key_points.append(f"Financial highlights: {', '.join(financial_matches[:3])}")
             
-            # Build comprehensive summary
-            summary_parts = []
+            # 2. Key announcements/decisions
+            announcement_words = ['announce', 'launch', 'new', 'decision', 'approve', 'strategy', 'acquisition', 'IPO', 'partnership']
+            for sentence in sentences[:20]:
+                if any(word in sentence.lower() for word in announcement_words):
+                    key_points.append(sentence)
+                    if len(key_points) >= 3:
+                        break
             
-            for category, points in categorized_points.items():
-                if points:
-                    category_title = category.replace('_', ' ').title()
-                    for point in points:
-                        summary_parts.append(f"• {point}")
+            # 3. Outlook/future direction
+            outlook_words = ['forecast', 'expect', 'project', 'plan', 'future', 'outlook', 'target', 'goal']
+            for sentence in sentences:
+                if any(word in sentence.lower() for word in outlook_words):
+                    key_points.append(sentence)
+                    if len(key_points) >= 4:
+                        break
             
-            # Add general points if we have space
-            for point in general_points[:3]:
-                summary_parts.append(f"• {point}")
+            # 4. Closing statement
+            closing_words = ['thank', 'appreciate', 'look forward', 'conclusion']
+            for sentence in reversed(sentences[-5:]):
+                if any(word in sentence.lower() for word in closing_words):
+                    key_points.append(sentence)
+                    break
             
-            if summary_parts:
-                return "\n".join(summary_parts)
-            else:
-                # Fallback: extract first substantial sentences
-                substantial_sentences = [s.strip() for s in sentences[:8] if len(s.strip()) > 30]
-                if substantial_sentences:
-                    return "\n".join([f"• {s}" for s in substantial_sentences[:6]])
-                else:
-                    return f"• {text[:300]}..." if len(text) > 300 else f"• {text}"
-        
+            # If we didn't find enough structured points, use first/last sentences
+            if len(key_points) < 3:
+                key_points = []
+                # First substantial sentence (introduction)
+                for sentence in sentences[:5]:
+                    if len(sentence) > 30:
+                        key_points.append(sentence)
+                        break
+                # Middle content
+                mid_start = len(sentences) // 3
+                for sentence in sentences[mid_start:mid_start+5]:
+                    if len(sentence) > 30:
+                        key_points.append(sentence)
+                        break
+                # Last substantial sentence (conclusion)
+                for sentence in reversed(sentences[-5:]):
+                    if len(sentence) > 30:
+                        key_points.append(sentence)
+                        break
+            
+            # Deduplicate while preserving order
+            seen = set()
+            unique_points = []
+            for point in key_points:
+                point_lower = point.lower()
+                if point_lower not in seen:
+                    seen.add(point_lower)
+                    unique_points.append(point)
+            
+            # Limit to 4-5 sentences max
+            final_summary = ". ".join(unique_points[:5])
+            
+            # Clean up
+            if not final_summary.endswith('.'):
+                final_summary += "."
+            
+            return final_summary
         except Exception as e:
-            logger.error(f"Error in enhanced summary: {str(e)}")
-            return "• Comprehensive summary not available"
+            logger.error(f"Error in concise summary: {str(e)}")
+            return "Summary not available."
     
     def fallback_summary(self, text):
         """Maintain original method for compatibility"""
-        return self.enhanced_fallback_summary(text)
+        return self.concise_executive_summary(text)
     
     def analyze_sentiment(self, text):
         """Analyze sentiment via HF Inference API (emotion-english-distilroberta) on full transcript"""
@@ -415,10 +467,9 @@ class MeetingAssistant:
             return "Sentiment: Neutral"
     
     def identify_key_topics(self, text):
-        """Fast key topics identification"""
+        """Extract semantic key topics using noun phrases and bigrams"""
         try:
-            words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
-            
+            # Enhanced stop words for business/financial content
             stop_words = {
                 'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 
                 'day', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 
@@ -428,21 +479,62 @@ class MeetingAssistant:
                 'would', 'there', 'could', 'other', 'after', 'first', 'never', 'these', 'think', 'where', 'being', 
                 'every', 'great', 'might', 'shall', 'still', 'those', 'under', 'while', 'again', 'before', 'right', 
                 'about', 'also', 'back', 'call', 'came', 'each', 'even', 'going', 'look', 'most', 'move', 'need', 
-                'only', 'said', 'same', 'show', 'tell', 'turn', 'ways', 'went', 'work', 'year', 'meeting'
+                'only', 'said', 'same', 'show', 'tell', 'turn', 'ways', 'went', 'work', 'year', 'meeting',
+                # Additional business stop words
+                'quarter', 'million', 'billion', 'percent', 'expect', 'drive', 'primarily', 'also', 'thank',
+                'look', 'forward', 'success', 'faith', 'adopted', 'approach', 'manage', 'healthy', 'level',
+                'indicate', 'exceed', 'confidence', 'conservative', 'bolstering', 'paving', 'aggressive'
             }
             
+            # Extract words (4+ chars)
+            words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
+            
+            # Extract bigrams (2-word phrases)
+            words_list = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+            bigrams = []
+            for i in range(len(words_list) - 1):
+                if words_list[i] not in stop_words and words_list[i+1] not in stop_words:
+                    bigrams.append(f"{words_list[i]} {words_list[i+1]}")
+            
+            # Count single words
             word_count = {}
             for word in words:
                 if word not in stop_words and len(word) > 3:
                     word_count[word] = word_count.get(word, 0) + 1
             
-            if not word_count:
-                return "• No significant topics identified"
+            # Count bigrams
+            bigram_count = {}
+            for bigram in bigrams:
+                if bigram not in bigram_count:
+                    bigram_count[bigram] = 0
+                bigram_count[bigram] += 1
             
-            top_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:10]
-            topics = [f"• {word.capitalize()} (mentioned {count} times)" for word, count in top_words if count > 1]
+            # Score: prefer bigrams, then high-frequency words
+            topics = []
             
-            return "\n".join(topics) if topics else "• No recurring topics identified"
+            # Add top bigrams (2-word phrases) with count >= 2
+            top_bigrams = sorted(bigram_count.items(), key=lambda x: x[1], reverse=True)[:5]
+            for bigram, count in top_bigrams:
+                if count >= 2:
+                    topics.append(f"• {bigram.title()} (mentioned {count} times)")
+            
+            # Add top single words with count >= 2 (if we need more)
+            if len(topics) < 5:
+                top_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:10]
+                for word, count in top_words:
+                    if count >= 2 and len(topics) < 7:
+                        topic_str = f"• {word.capitalize()} (mentioned {count} times)"
+                        # Check if word is already part of a bigram topic
+                        already_covered = any(word in t.lower() for t in topics)
+                        if not already_covered:
+                            topics.append(topic_str)
+            
+            # If no high-frequency topics, return first few unique content words
+            if not topics:
+                content_words = [w for w, c in sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:10]]
+                topics = [f"• {w.capitalize()}" for w in content_words[:5]]
+            
+            return "\n".join(topics[:7]) if topics else "• No significant topics identified"
         
         except Exception as e:
             logger.error(f"Error identifying topics: {str(e)}")
@@ -495,6 +587,21 @@ class MeetingAssistant:
             transcript_time = time.time() - start_time
             logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
             
+            # Step 1.5: Speaker Diarization
+            if progress is not None:
+                progress(0.25, desc="Analyzing speakers...")
+            
+            diarization = self._perform_diarization(audio_file)
+            if diarization:
+                unique_speakers = set(s['speaker'] for s in diarization)
+                speaker_count = len(unique_speakers)
+                is_single_speaker = speaker_count <= 1
+                logger.info(f"🎤 Diarization: {speaker_count} speaker(s) detected")
+            else:
+                speaker_count = 1
+                is_single_speaker = True
+                logger.info("🎤 Diarization skipped — defaulting to single speaker")
+            
             # Step 2: Analysis
             if progress is not None:
                 progress(0.3, desc="Running parallel analysis...")
@@ -509,7 +616,7 @@ class MeetingAssistant:
                 
                 # Run action items and topics in parallel
                 with ThreadPoolExecutor(max_workers=2) as executor:
-                    fut_actions = executor.submit(self.extract_action_items, transcription)
+                    fut_actions = executor.submit(self.extract_action_items, transcription, is_single_speaker)
                     fut_topics = executor.submit(self.identify_key_topics, transcription)
                     action_items = fut_actions.result()
                     key_topics = fut_topics.result()
@@ -518,7 +625,7 @@ class MeetingAssistant:
                 logger.info(f"⚡ Running parallel analysis on {len(transcription)} chars...")
                 with ThreadPoolExecutor(max_workers=4) as executor:
                     fut_summary = executor.submit(self.summarize_text, transcription)
-                    fut_actions = executor.submit(self.extract_action_items, transcription)
+                    fut_actions = executor.submit(self.extract_action_items, transcription, is_single_speaker)
                     fut_sentiment = executor.submit(self.analyze_sentiment, transcription)
                     fut_topics = executor.submit(self.identify_key_topics, transcription)
                     
@@ -539,7 +646,7 @@ class MeetingAssistant:
             
             # Step 3: Generate comprehensive report
             meeting_minutes = self._generate_meeting_report(
-                transcription, summary, action_items, sentiment, key_topics, duration
+                transcription, summary, action_items, sentiment, key_topics, duration, speaker_count
             )
             
             total_time = time.time() - start_time
@@ -812,7 +919,7 @@ class MeetingAssistant:
             return final_summary
         except Exception as e:
             logger.warning(f"Map-reduce summarization failed: {e}")
-            return self.enhanced_fallback_summary(text)
+            return self.concise_executive_summary(text)
     
     def _segmented_sentiment(self, text, progress=None):
         """Sentiment analysis segmented by speaker or time"""
@@ -887,29 +994,52 @@ class MeetingAssistant:
             logger.warning(f"⚠️ Could not load checkpoint: {e}")
         return None
     
-    def _generate_meeting_report(self, transcript, summary, actions, sentiment, topics, duration=None):
+    def _generate_meeting_report(self, transcript, summary, actions, sentiment, topics, duration=None, speaker_count=1):
         """Generate meeting report with brutalist terminal formatting"""
         sep = "=" * 52
+        
+        # Duration string
         duration_str = f"\n>> DURATION\n{duration:.1f} seconds ({duration/60:.1f} minutes)" if duration else ""
+        
+        # Meeting type indicator
+        if speaker_count <= 1:
+            meeting_type = "PRESENTATION / BRIEFING"
+        elif speaker_count == 2:
+            meeting_type = "1-ON-1 MEETING"
+        else:
+            meeting_type = f"MULTI-PARTICIPANT MEETING ({speaker_count} speakers)"
+        
+        # Task list with meeting-type awareness
+        if speaker_count <= 1:
+            # Single speaker - check if actions indicate no tasks
+            if "No actionable tasks" in actions or "no assignments" in actions.lower():
+                task_section = f">> ACTION ITEMS\n{actions}\n\nNote: This appears to be a presentation or briefing\nwith no explicit task assignments."
+            else:
+                task_section = f">> ACTION ITEMS\n{actions}"
+        else:
+            task_section = f">> ACTION ITEMS\n{actions}"
+        
         return f"""{sep}
-                  MEETING ANALYSIS REPORT
+                MEETING MINUTES
 {sep}
+
+>> MEETING TYPE
+{meeting_type}
 {duration_str}
 
->> SUMMARY
+>> EXECUTIVE SUMMARY
 {summary}
 
->> TASK LIST
-{actions}
+{task_section}
 
->> SENTIMENT
+>> SPEAKER SENTIMENT
 {sentiment}
 
->> KEY TOPICS
+>> KEY DISCUSSION POINTS
 {topics}
 
 {sep}
-          PROCESSED BY AI MEETING ASSISTANT
+        GENERATED BY AI MEETING ASSISTANT
 {sep}"""
 
 
