@@ -1234,6 +1234,11 @@ body::before{
 gradio-app footer:not(.brutal-footer),#footer,.built-with-gradio{display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important;opacity:0!important}
 
 /* ═══ GRADIO LABEL OVERRIDES ═══ */
+.gr-html .brutal-header,
+div.brutal-header,
+.brutal-header *{
+    text-align:center!important;
+}
 label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
     font-family:var(--fh)!important;
     font-weight:400!important;
@@ -1246,7 +1251,7 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
 
 /* ═══ HERO HEADER ═══ */
 .brutal-header{
-    text-align:center;
+    text-align:center!important;
     padding:3.5rem 2.5rem 1.5rem;
     max-width:100%;
     margin:0 auto;
@@ -1294,8 +1299,9 @@ label,.gr-input-label,.gr-audio label,.gr-textbox label,.gr-file label{
     letter-spacing:0.05em;
     line-height:1.8;
     max-width:600px;
-    margin:0 auto;
-    text-align:center;
+    margin-left:auto!important;
+    margin-right:auto!important;
+    text-align:center!important;
 }
 .header-desc strong{color:var(--txt2);font-weight:500}
 
