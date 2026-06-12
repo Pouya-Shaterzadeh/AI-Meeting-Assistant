@@ -158,7 +158,12 @@ class MeetingAssistant:
                 audio_path,
                 model=self.ASR_MODEL
             )
-            transcription = result.get("text", "")
+            if isinstance(result, dict):
+                transcription = result.get("text", "")
+            elif isinstance(result, str):
+                transcription = result
+            else:
+                transcription = ""
 
             if not transcription:
                 return "No speech detected in the audio file.", []
@@ -205,7 +210,11 @@ class MeetingAssistant:
                 max_tokens=self._llm_max_tokens,
                 temperature=0.2
             )
-            content = response["choices"][0]["message"]["content"]
+            choices = response.get("choices", [])
+            if not choices or not choices[0].get("message", {}).get("content"):
+                logger.warning("LLM returned no choices — falling back to regex")
+                return self._extract_tasks_fallback(text)
+            content = choices[0]["message"]["content"]
             logger.info("✅ LLM task extraction completed")
             return content.strip()
 
@@ -267,7 +276,14 @@ class MeetingAssistant:
                 model=self.SUM_MODEL,
                 parameters={"max_length": 200, "min_length": 80, "do_sample": False}
             )
-            summary = result.get("summary_text", "")
+            if isinstance(result, dict):
+                summary = result.get("summary_text", "")
+            elif isinstance(result, str):
+                summary = result
+            else:
+                summary = ""
+            if not summary:
+                return self.enhanced_fallback_summary(text)
             logger.info("✅ Summarization completed via API")
             return summary
 
@@ -463,7 +479,12 @@ class MeetingAssistant:
                     audio_file,
                     model=self.ASR_MODEL
                 )
-                transcription = result.get("text", "")
+                if isinstance(result, dict):
+                    transcription = result.get("text", "")
+                elif isinstance(result, str):
+                    transcription = result
+                else:
+                    transcription = ""
             
             if not transcription:
                 return "No speech detected in the audio file.", None
@@ -700,7 +721,12 @@ class MeetingAssistant:
                     chunk['path'],
                     model=self.ASR_MODEL
                 )
-                chunk_text = result.get("text", "")
+                if isinstance(result, dict):
+                    chunk_text = result.get("text", "")
+                elif isinstance(result, str):
+                    chunk_text = result
+                else:
+                    chunk_text = ""
                 if chunk_text:
                     transcriptions.append(chunk_text)
             
@@ -1778,7 +1804,6 @@ def _generate_demo_audio():
             repo_type="dataset",
             token=hf_token,
             local_dir=os.path.dirname(demo_path),
-            local_dir_use_symlinks=False,
         )
         # hf_hub_download may return a different path; rename to expected
         if downloaded != demo_path and os.path.exists(downloaded):
