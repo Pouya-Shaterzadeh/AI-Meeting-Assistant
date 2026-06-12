@@ -774,11 +774,12 @@ EXAMPLE OUTPUT:
             if torch.cuda.is_available():
                 pipeline = pipeline.to(torch.device("cuda"))
             
-            diarization = pipeline(audio_path)
+            result = pipeline(audio_path)
+            annotation = result.annotation if hasattr(result, 'annotation') else result
             
             # Convert to list of (start, end, speaker) tuples
             segments = []
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
+            for turn, _, speaker in annotation.itertracks(yield_label=True):
                 segments.append({
                     'start': turn.start,
                     'end': turn.end,
