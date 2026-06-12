@@ -767,7 +767,7 @@ EXAMPLE OUTPUT:
             logger.info("⚡ Performing speaker diarization...")
             pipeline = Pipeline.from_pretrained(
                 self.DIARIZATION_MODEL,
-                use_auth_token=self.hf_token
+                token=self.hf_token
             )
             
             # Move to GPU if available
