@@ -142,11 +142,8 @@ class MeetingAssistant:
 
             logger.info("⚡ Transcribing via HF Inference API (whisper-large-v3-turbo)...")
 
-            with open(audio_path, "rb") as f:
-                audio_bytes = f.read()
-
             result = self.client.automatic_speech_recognition(
-                audio_bytes,
+                audio_path,
                 model=self.ASR_MODEL
             )
             transcription = result.get("text", "")
