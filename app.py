@@ -87,6 +87,13 @@ class MeetingAssistant:
             self.client = None
         else:
             self.client = InferenceClient(token=self.hf_token)
+
+        # LangSmith status
+        from tracing import _is_langsmith_enabled
+        if _is_langsmith_enabled():
+            logger.info("✅ LangSmith tracing enabled")
+        else:
+            logger.info("ℹ️ LangSmith tracing disabled (set LANGCHAIN_TRACING_V2=true to enable)")
             logger.info("✅ HF Inference API client initialized")
 
         # Initialize LangChain ChatPromptTemplate for task extraction
