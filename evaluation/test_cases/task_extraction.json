@@ -1,0 +1,45 @@
+{
+  "test_suite": "task_extraction",
+  "version": "1.0.0",
+  "description": "Task extraction quality evaluation",
+  "test_cases": [
+    {
+      "id": "task_001",
+      "category": "multi_speaker_with_tasks",
+      "speaker_count": 3,
+      "input": "Manager: We need to finalize the budget by Friday. Sarah, can you prepare the financial projections? Sarah: Sure, I'll have them ready by Thursday. John: I'll review the marketing plan and send my comments by Wednesday. Manager: Great, let's reconvene on Monday to approve everything.",
+      "expected_tasks": ["Sarah: prepare financial projections by Thursday", "John: review marketing plan by Wednesday", "reconvene on Monday to approve"],
+      "expected_count_min": 2,
+      "tags": ["clear_assignments", "deadlines"]
+    },
+    {
+      "id": "task_002",
+      "category": "single_speaker_no_tasks",
+      "speaker_count": 1,
+      "input": "Welcome to today's briefing. Our Q1 revenue was $50 million, up 15% year-over-year. We launched the new AI platform last month. Customer retention improved to 92%. We expect continued growth in Q2.",
+      "expected_tasks": [],
+      "expected_count_min": 0,
+      "expected_exact": "No actionable tasks identified",
+      "tags": ["presentation", "no_assignments"]
+    },
+    {
+      "id": "task_003",
+      "category": "multi_speaker_implicit",
+      "speaker_count": 4,
+      "input": "Lead: The client wants the demo by next week. Dev: I can have the backend ready by Tuesday. QA: I'll start testing Wednesday. Lead: Design team, we need updated mockups. Designer: Mockups will be ready Monday. Lead: Perfect, let's ship Thursday.",
+      "expected_tasks": ["Dev: backend ready by Tuesday", "QA: testing Wednesday", "Designer: mockups ready Monday", "ship Thursday"],
+      "expected_count_min": 3,
+      "tags": ["implicit_assignments", "team_coordination"]
+    },
+    {
+      "id": "task_004",
+      "category": "single_speaker_future_tense",
+      "speaker_count": 1,
+      "input": "We will be launching the new product next quarter. The team is working hard on the features. We expect to reach 100,000 users by year end. The marketing campaign will start in June.",
+      "expected_tasks": [],
+      "expected_count_min": 0,
+      "expected_exact": "No actionable tasks identified",
+      "tags": ["future_tense", "no_explicit_assignments"]
+    }
+  ]
+}

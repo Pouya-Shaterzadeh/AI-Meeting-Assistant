@@ -1,0 +1,47 @@
+{
+  "test_suite": "executive_summary",
+  "version": "1.0.0",
+  "description": "Executive summary quality evaluation",
+  "test_cases": [
+    {
+      "id": "sum_001",
+      "category": "financial",
+      "input": "Our Q1 revenue was $50 million, up 15% year-over-year. We launched the new AI platform last month. Customer retention improved to 92%. We expect continued growth in Q2 with projected revenue of $55 million.",
+      "expected_keywords": ["$50 million", "15%", "92%", "Q2"],
+      "expected_contains": ["revenue", "growth"],
+      "tags": ["financial_metrics", "short_transcript"]
+    },
+    {
+      "id": "sum_002",
+      "category": "risk_assessment",
+      "input": "The company maintains a 99% confidence level that the maximum loss will not exceed $5 million in the next trading day, with a robust tier one capital ratio of 12.5%. Forecasts for the next quarter predict revenue of $135 million, a 8% quarter-over-quarter growth, driven by blockchain solutions and AI analytics, and an anticipated $200 million IPO from PayPlus subsidiary, promising enhanced liquidity and growth opportunities.",
+      "expected_keywords": ["$5 million", "12.5%", "$135 million", "8%", "$200 million", "IPO"],
+      "expected_contains": ["risk", "capital"],
+      "tags": ["risk_metrics", "multi_topic"]
+    },
+    {
+      "id": "sum_003",
+      "category": "technical",
+      "input": "We completed the migration to Kubernetes last Friday. The new system handles 10,000 requests per second with 99.99% uptime. Latency dropped from 200ms to 45ms. The team plans to add auto-scaling by end of month.",
+      "expected_keywords": ["Kubernetes", "10,000", "99.99%", "45ms"],
+      "expected_contains": ["migration", "latency"],
+      "tags": ["technical", "infrastructure"]
+    },
+    {
+      "id": "sum_004",
+      "category": "edge_case_short",
+      "input": "The meeting was rescheduled to next Tuesday.",
+      "expected_keywords": [],
+      "expected_contains": ["rescheduled"],
+      "tags": ["edge_case", "minimal_info"]
+    },
+    {
+      "id": "sum_005",
+      "category": "single_speaker",
+      "input": "Welcome everyone to today's quarterly review. I'll be covering our financial performance, operational highlights, and strategic outlook. Let's start with the numbers. Revenue came in at $42 million for the quarter, which represents a 12% increase from last quarter. Our operating margin improved to 18%, up from 15% last quarter. The main driver was our enterprise segment, which grew 25% to $28 million. On the cost side, we kept operating expenses flat at $34 million despite hiring 15 new engineers. Looking ahead, we expect Q2 revenue between $45-48 million. We're also on track for the PayPlus IPO in Q3, which we expect to raise approximately $200 million. Any questions?",
+      "expected_keywords": ["$42 million", "12%", "18%", "$28 million", "25%", "$45-48 million", "$200 million", "IPO"],
+      "expected_contains": ["revenue", "growth", "IPO"],
+      "tags": ["single_speaker", "presentation", "financial"]
+    }
+  ]
+}

@@ -12,6 +12,15 @@ import json
 import hashlib
 import math
 
+# Versioned prompts and tracing
+from prompts import (
+    EXECUTIVE_SUMMARY,
+    TASK_EXTRACTION_SINGLE_SPEAKER,
+    TASK_EXTRACTION_MULTI_SPEAKER,
+    VERSION as PROMPT_VERSION,
+)
+from tracing import trace_meeting_analysis, log_llm_call
+
 # Monkey-patch gradio_client to fix JSON schema bug with additionalProperties: true
 import gradio_client.utils as _gc_utils
 import logging
@@ -188,70 +197,42 @@ class MeetingAssistant:
     def _extract_tasks_with_llm(self, text, is_single_speaker=False):
         """Use Phi-3-mini to extract structured action items from transcript"""
         try:
-            if is_single_speaker:
-                system_prompt = """You are an expert meeting analyst specializing in single-speaker presentations and briefings.
-
-IMPORTANT RULES FOR SINGLE-SPEAKER CONTENT:
-- The speaker is presenting information, not assigning tasks to others
-- Unless the speaker explicitly says "I will..." or "We will..." or assigns a task to a named person, there are NO actionable tasks
-- Do NOT invent people, names, or assignments
-- Do NOT assume the speaker is assigning tasks just because they mention future actions
-
-If no explicit action items, commitments, or task assignments are clearly stated, return EXACTLY:
-• No actionable tasks identified — this is a presentation/briefing with no assignments
-
-Only extract tasks if the speaker explicitly:
-1. Commits to a specific action ("I will prepare the report by Friday")
-2. Assigns a task to a named person ("Sarah, please review the proposal")
-3. Makes a clear promise or commitment with a deadline
-
-Format each task as:
-• WHO: WHAT (deadline if mentioned)
-"""
-            else:
-                system_prompt = """You are an expert meeting analyst specializing in extracting actionable tasks from multi-participant meeting transcripts.
-
-Your expertise includes:
-- Identifying concrete, specific action items with clear ownership
-- Extracting deadlines, timeframes, and follow-up requirements
-- Recognizing commitments, assignments, and next steps
-- Distinguishing between decisions and actionable tasks
-- Capturing both explicit and implicit task assignments
-
-IMPORTANT: Only extract tasks that are explicitly stated in the transcript. Do not invent tasks, people, or deadlines.
-
-Format each task as:
-• WHO: WHAT (deadline if mentioned)
-"""
-            
-            if LANGCHAIN_AVAILABLE and hasattr(self, 'task_extraction_template'):
-                messages = self.task_extraction_template.format_messages(
-                    meeting_text=text[:4000]
-                )
-                api_messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Analyze this meeting transcript and extract actionable tasks:\n\n{text[:4000]}\n\nEXTRACTED TASKS (if any):"}
-                ]
-            else:
-                api_messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Analyze this meeting transcript and extract actionable tasks:\n\n{text[:4000]}\n\nEXTRACTED TASKS (if any):"}
-                ]
+            prompt = TASK_EXTRACTION_SINGLE_SPEAKER if is_single_speaker else TASK_EXTRACTION_MULTI_SPEAKER
+            api_messages = [
+                {"role": "system", "content": prompt["system"]},
+                {"role": "user", "content": prompt["user"].format(text=text[:4000])},
+            ]
 
             logger.info("⚡ Extracting action items via Phi-3-mini...")
+            start = time.monotonic()
             response = self.client.chat_completion(
                 messages=api_messages,
                 model=self.LLM_MODEL,
-                max_tokens=self._llm_max_tokens,
-                temperature=0.2
+                max_tokens=prompt["max_tokens"],
+                temperature=prompt["temperature"],
             )
+            latency_ms = int((time.monotonic() - start) * 1000)
+
             choices = response.get("choices", [])
             if not choices or not choices[0].get("message", {}).get("content"):
                 logger.warning("LLM returned no choices — falling back to regex")
                 return self._extract_tasks_fallback(text)
-            content = choices[0]["message"]["content"]
+            content = choices[0]["message"]["content"].strip()
             logger.info("✅ LLM task extraction completed")
-            return content.strip()
+
+            prompt_name = "task_extraction_single_speaker" if is_single_speaker else "task_extraction_multi_speaker"
+            log_llm_call(
+                prompt_name=prompt_name,
+                prompt_version=PROMPT_VERSION,
+                model=self.LLM_MODEL,
+                input_text=text[:500],
+                output_text=content,
+                latency_ms=latency_ms,
+                temperature=prompt["temperature"],
+                max_tokens=prompt["max_tokens"],
+            )
+
+            return content
 
         except Exception as e:
             logger.warning(f"LLM task extraction failed, falling back to regex: {e}")
@@ -315,36 +296,35 @@ Format each task as:
 
     def _llm_executive_summary(self, text):
         """Use Phi-3-mini to generate semantic executive summary"""
+        prompt = EXECUTIVE_SUMMARY
         api_messages = [
-            {"role": "system", "content": """You are an expert executive assistant writing meeting minutes.
-
-TASK: Analyze the transcript and write a 2-3 sentence executive summary.
-
-RULES:
-- Capture the MOST IMPORTANT points: financial metrics, risk indicators, strategic announcements, outlook
-- Be SPECIFIC with numbers (revenue figures, percentages, ratios)
-- Do NOT include filler phrases like "the speaker mentioned" or "in this meeting"
-- Output ONLY the summary sentences, nothing else
-- Do NOT add bullet points or formatting — just plain sentences
-
-EXAMPLE INPUT:
-"Our Q1 revenue was $50 million, up 15% year-over-year. We launched the new AI platform last month. Customer retention improved to 92%. We expect continued growth in Q2."
-
-EXAMPLE OUTPUT:
-"Q1 revenue reached $50 million, a 15% year-over-year increase, with customer retention improving to 92% following the launch of the new AI platform. Continued growth is expected in Q2."
-"""},
-            {"role": "user", "content": f"Write a 2-3 sentence executive summary of this transcript:\n\n{text[:3000]}"}
+            {"role": "system", "content": prompt["system"]},
+            {"role": "user", "content": prompt["user"].format(text=text[:3000])},
         ]
 
+        start = time.monotonic()
         response = self.client.chat_completion(
             messages=api_messages,
             model=self.LLM_MODEL,
-            max_tokens=200,
-            temperature=0.1
+            max_tokens=prompt["max_tokens"],
+            temperature=prompt["temperature"],
         )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
         choices = response.get("choices", [])
         if choices and choices[0].get("message", {}).get("content"):
-            return choices[0]["message"]["content"].strip()
+            result = choices[0]["message"]["content"].strip()
+            log_llm_call(
+                prompt_name="executive_summary",
+                prompt_version=PROMPT_VERSION,
+                model=self.LLM_MODEL,
+                input_text=text[:500],
+                output_text=result,
+                latency_ms=latency_ms,
+                temperature=prompt["temperature"],
+                max_tokens=prompt["max_tokens"],
+            )
+            return result
         raise Exception("No content returned")
 
     def _bart_summary(self, text):
@@ -548,75 +528,92 @@ EXAMPLE OUTPUT:
             if is_long_audio:
                 logger.info(f"⚡ Long audio detected ({duration:.1f}s), using chunked processing")
             
-            # Step 1: Transcription
-            if progress is not None:
-                progress(0.1, desc="Transcribing audio...")
-            
-            if is_long_audio:
-                transcription = self._chunked_transcription(audio_file, progress)
-            else:
-                result = self.client.automatic_speech_recognition(
-                    audio_file,
-                    model=self.ASR_MODEL
-                )
-                logger.info(f"  ASR result type: {type(result).__name__}")
-                if isinstance(result, dict):
-                    transcription = result.get("text", "")
-                elif isinstance(result, str):
-                    transcription = result
-                else:
-                    logger.warning(f"  Unexpected ASR result: {result}")
-                    transcription = ""
-                logger.info(f"  Transcription length: {len(transcription)} chars")
-            
-            if not transcription:
-                return "No speech detected in the audio file.", None
-            
-            transcript_time = time.time() - start_time
-            logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
-            
-            # Step 1.5: Speaker count (default — no diarization)
-            speaker_count = 1
-            is_single_speaker = True
-            
-            # Step 2: Analysis
-            if progress is not None:
-                progress(0.3, desc="Running parallel analysis...")
-            
-            analysis_start = time.time()
-            
-            # Use map-reduce for long transcripts, parallel for short
-            if is_long_audio and len(transcription) > 3000:
-                # Long transcript - use map-reduce summarization
-                summary = self._map_reduce_summarize(transcription, progress)
-                sentiment = self._segmented_sentiment(transcription, progress)
+            with trace_meeting_analysis(duration, is_long_audio, PROMPT_VERSION) as trace:
+                # Step 1: Transcription
+                if progress is not None:
+                    progress(0.1, desc="Transcribing audio...")
                 
-                # Run action items and topics in parallel
-                with ThreadPoolExecutor(max_workers=2) as executor:
-                    fut_actions = executor.submit(self.extract_action_items, transcription, is_single_speaker)
-                    fut_topics = executor.submit(self.identify_key_topics, transcription)
-                    action_items = fut_actions.result()
-                    key_topics = fut_topics.result()
-            else:
-                # Short transcript - run all in parallel
-                logger.info(f"⚡ Running parallel analysis on {len(transcription)} chars...")
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    fut_summary = executor.submit(self.summarize_text, transcription)
-                    fut_actions = executor.submit(self.extract_action_items, transcription, is_single_speaker)
-                    fut_sentiment = executor.submit(self.analyze_sentiment, transcription)
-                    fut_topics = executor.submit(self.identify_key_topics, transcription)
+                trans_start = time.monotonic()
+                if is_long_audio:
+                    transcription = self._chunked_transcription(audio_file, progress)
+                else:
+                    result = self.client.automatic_speech_recognition(
+                        audio_file,
+                        model=self.ASR_MODEL
+                    )
+                    logger.info(f"  ASR result type: {type(result).__name__}")
+                    if isinstance(result, dict):
+                        transcription = result.get("text", "")
+                    elif isinstance(result, str):
+                        transcription = result
+                    else:
+                        logger.warning(f"  Unexpected ASR result: {result}")
+                        transcription = ""
+                    logger.info(f"  Transcription length: {len(transcription)} chars")
+                
+                if not transcription:
+                    return "No speech detected in the audio file.", None
+                
+                trace.log(
+                    "transcription",
+                    latency_ms=int((time.monotonic() - trans_start) * 1000),
+                    chars=len(transcription),
+                    model=self.ASR_MODEL,
+                )
+                
+                transcript_time = time.time() - start_time
+                logger.info(f"⚡ Transcription completed in {transcript_time:.2f}s")
+                
+                # Step 1.5: Speaker count (default — no diarization)
+                speaker_count = 1
+                is_single_speaker = True
+                
+                # Step 2: Analysis
+                if progress is not None:
+                    progress(0.3, desc="Running parallel analysis...")
+                
+                analysis_start = time.time()
+                
+                # Use map-reduce for long transcripts, parallel for short
+                if is_long_audio and len(transcription) > 3000:
+                    # Long transcript - use map-reduce summarization
+                    summary = self._map_reduce_summarize(transcription, progress)
+                    sentiment = self._segmented_sentiment(transcription, progress)
                     
-                    summary = fut_summary.result()
-                    logger.info("  ✅ Summary done")
-                    action_items = fut_actions.result()
-                    logger.info("  ✅ Action items done")
-                    sentiment = fut_sentiment.result()
-                    logger.info("  ✅ Sentiment done")
-                    key_topics = fut_topics.result()
-                    logger.info("  ✅ Topics done")
-            
-            analysis_time = time.time() - analysis_start
-            logger.info(f"⚡ Analysis completed in {analysis_time:.2f}s")
+                    # Run action items and topics in parallel
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        fut_actions = executor.submit(self.extract_action_items, transcription, is_single_speaker)
+                        fut_topics = executor.submit(self.identify_key_topics, transcription)
+                        action_items = fut_actions.result()
+                        key_topics = fut_topics.result()
+                else:
+                    # Short transcript - run all in parallel
+                    logger.info(f"⚡ Running parallel analysis on {len(transcription)} chars...")
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        fut_summary = executor.submit(self.summarize_text, transcription)
+                        fut_actions = executor.submit(self.extract_action_items, transcription, is_single_speaker)
+                        fut_sentiment = executor.submit(self.analyze_sentiment, transcription)
+                        fut_topics = executor.submit(self.identify_key_topics, transcription)
+                        
+                        summary = fut_summary.result()
+                        logger.info("  ✅ Summary done")
+                        action_items = fut_actions.result()
+                        logger.info("  ✅ Action items done")
+                        sentiment = fut_sentiment.result()
+                        logger.info("  ✅ Sentiment done")
+                        key_topics = fut_topics.result()
+                        logger.info("  ✅ Topics done")
+                
+                analysis_time = time.time() - analysis_start
+                logger.info(f"⚡ Analysis completed in {analysis_time:.2f}s")
+                
+                trace.log(
+                    "analysis",
+                    latency_ms=int(analysis_time * 1000),
+                    prompt_version=PROMPT_VERSION,
+                    is_long_audio=is_long_audio,
+                    transcript_chars=len(transcription),
+                )
             
             if progress is not None:
                 progress(0.85, desc="Generating report...")
