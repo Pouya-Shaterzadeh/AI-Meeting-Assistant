@@ -694,54 +694,62 @@ class MeetingAssistant:
             return audio_path
     
     def _create_audio_chunks(self, audio_path, chunk_duration=None, overlap=None):
-        """Split audio into overlapping chunks for processing"""
+        """Split audio into overlapping chunks using stdlib wave module"""
+        import wave, struct
+
+        if chunk_duration is None:
+            chunk_duration = self.CHUNK_DURATION
+        if overlap is None:
+            overlap = self.CHUNK_OVERLAP
+
         try:
-            import torch
-            import torchaudio
-            
-            if chunk_duration is None:
-                chunk_duration = self.CHUNK_DURATION
-            if overlap is None:
-                overlap = self.CHUNK_OVERLAP
-            
-            waveform, sample_rate = torchaudio.load(audio_path)
-            total_samples = waveform.shape[1]
-            chunk_samples = int(chunk_duration * sample_rate)
-            overlap_samples = int(overlap * sample_rate)
-            step_samples = chunk_samples - overlap_samples
-            
+            with wave.open(audio_path, 'rb') as wf:
+                n_channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                sample_rate = wf.getframerate()
+                n_frames = wf.getnframes()
+                raw_data = wf.readframes(n_frames)
+
+            bytes_per_frame = n_channels * sampwidth
+            total_frames = len(raw_data) // bytes_per_frame
+            chunk_frames = int(chunk_duration * sample_rate)
+            overlap_frames = int(overlap * sample_rate)
+            step_frames = chunk_frames - overlap_frames
+
             chunks = []
             chunk_dir = tempfile.mkdtemp(prefix='meeting_chunks_')
-            
+
             start = 0
             chunk_idx = 0
-            
-            while start < total_samples:
-                end = min(start + chunk_samples, total_samples)
-                chunk_waveform = waveform[:, start:end]
-                
+
+            while start < total_frames:
+                end = min(start + chunk_frames, total_frames)
+                start_byte = start * bytes_per_frame
+                end_byte = end * bytes_per_frame
+                chunk_data = raw_data[start_byte:end_byte]
+
                 chunk_path = os.path.join(chunk_dir, f'chunk_{chunk_idx:04d}.wav')
-                torchaudio.save(chunk_path, chunk_waveform, sample_rate)
-                
+                with wave.open(chunk_path, 'wb') as out:
+                    out.setnchannels(n_channels)
+                    out.setsampwidth(sampwidth)
+                    out.setframerate(sample_rate)
+                    out.writeframes(chunk_data)
+
                 chunks.append({
                     'path': chunk_path,
                     'start_time': start / sample_rate,
                     'end_time': end / sample_rate,
                     'index': chunk_idx
                 })
-                
+
                 chunk_idx += 1
-                start += step_samples
-                
-                # Stop if we've reached the end
-                if end >= total_samples:
+                start += step_frames
+
+                if end >= total_frames:
                     break
-            
+
             logger.info(f"✅ Created {len(chunks)} audio chunks")
             return chunks, chunk_dir
-        except ImportError:
-            logger.warning("⚠️ torch/torchaudio not available for chunking")
-            return [{'path': audio_path, 'start_time': 0, 'end_time': 0, 'index': 0}], None
         except Exception as e:
             logger.warning(f"⚠️ Audio chunking failed: {e}")
             return [{'path': audio_path, 'start_time': 0, 'end_time': 0, 'index': 0}], None
