@@ -17,12 +17,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-LANGSMITH_ENABLED = os.environ.get("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+
+def _is_langsmith_enabled():
+    """Check at call time, not import time."""
+    return os.environ.get("LANGCHAIN_TRACING_V2", "false").lower() == "true"
 
 
 def _get_client():
     """Lazy-import LangSmith client to avoid startup cost when disabled."""
-    if not LANGSMITH_ENABLED:
+    if not _is_langsmith_enabled():
         return None
     try:
         from langsmith import Client
@@ -120,20 +123,32 @@ def _log_run(run_data: dict):
     # LangSmith trace
     client = get_client()
     if client is None:
+        logger.info("LangSmith client not available — skipping remote trace")
         return
 
     try:
-        from langsmith import traceable
-
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
 
-        @traceable(run_type="chain", name="meeting_analysis", project_name=project)
-        def _run(data):
-            for step in data.get("steps", []):
-                logger.info(f"LangSmith step: {step}")
-            return data
-
-        _run(run_data)
+        client.create_run(
+            name="meeting_analysis",
+            run_type="chain",
+            inputs={
+                "audio_duration_s": run_data.get("audio_duration_s"),
+                "is_long_audio": run_data.get("is_long_audio"),
+                "prompt_version": run_data.get("prompt_version"),
+            },
+            outputs={
+                "total_latency_ms": run_data.get("total_latency_ms"),
+                "steps": run_data.get("steps", []),
+                "error": run_data.get("error"),
+            },
+            extra={
+                "start_time": run_data.get("start_time"),
+                "end_time": run_data.get("end_time"),
+            },
+            project_name=project,
+        )
+        logger.info("LangSmith trace sent successfully")
     except Exception as e:
         logger.warning(f"LangSmith trace failed: {e}")
 
