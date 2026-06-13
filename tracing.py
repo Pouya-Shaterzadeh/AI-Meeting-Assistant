@@ -148,6 +148,7 @@ def _log_run(run_data: dict):
             },
             project_name=project,
         )
+        client.flush()
         logger.info("LangSmith trace sent successfully")
     except Exception as e:
         logger.warning(f"LangSmith trace failed: {e}")
@@ -206,6 +207,7 @@ def log_llm_call(
             },
             project_name=project,
         )
+        client.flush()
     except Exception as e:
         logger.warning(f"LangSmith log_llm_call failed: {e}")
 
@@ -253,5 +255,6 @@ def log_evaluation_result(
             extra={"prompt_version": prompt_version},
             project_name=project,
         )
+        client.flush()
     except Exception as e:
         logger.warning(f"LangSmith log_evaluation_result failed: {e}")
