@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from typing import Optional
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +129,10 @@ def _log_run(run_data: dict):
 
     try:
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
+        now = datetime.now(timezone.utc)
 
         client.create_run(
+            id=uuid4(),
             name="meeting_analysis",
             run_type="chain",
             inputs={
@@ -142,13 +145,10 @@ def _log_run(run_data: dict):
                 "steps": run_data.get("steps", []),
                 "error": run_data.get("error"),
             },
-            extra={
-                "start_time": run_data.get("start_time"),
-                "end_time": run_data.get("end_time"),
-            },
+            start_time=now,
+            end_time=now,
             project_name=project,
         )
-        client.flush()
         logger.info("LangSmith trace sent successfully")
     except Exception as e:
         logger.warning(f"LangSmith trace failed: {e}")
@@ -193,12 +193,16 @@ def log_llm_call(
 
     try:
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
+        now = datetime.now(timezone.utc)
 
         client.create_run(
+            id=uuid4(),
             name=f"llm_{prompt_name}",
             run_type="llm",
             inputs={"text": input_text[:1000], "prompt_version": prompt_version},
             outputs={"response": output_text[:1000], "latency_ms": latency_ms},
+            start_time=now,
+            end_time=now,
             extra={
                 "model": model,
                 "temperature": temperature,
@@ -207,7 +211,6 @@ def log_llm_call(
             },
             project_name=project,
         )
-        client.flush()
     except Exception as e:
         logger.warning(f"LangSmith log_llm_call failed: {e}")
 
@@ -243,8 +246,10 @@ def log_evaluation_result(
 
     try:
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
+        now = datetime.now(timezone.utc)
 
         client.create_run(
+            id=uuid4(),
             name=f"eval_{prompt_name}",
             run_type="chain",
             inputs={
@@ -252,9 +257,10 @@ def log_evaluation_result(
                 "transcript": transcript_preview[:1000],
             },
             outputs={"scores": scores, "response": response[:1000]},
+            start_time=now,
+            end_time=now,
             extra={"prompt_version": prompt_version},
             project_name=project,
         )
-        client.flush()
     except Exception as e:
         logger.warning(f"LangSmith log_evaluation_result failed: {e}")
