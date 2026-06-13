@@ -129,7 +129,7 @@ def _log_run(run_data: dict):
     try:
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
 
-        run = client.create_run(
+        client.create_run(
             name="meeting_analysis",
             run_type="chain",
             inputs={
@@ -148,7 +148,6 @@ def _log_run(run_data: dict):
             },
             project_name=project,
         )
-        client.update_run(run.id, status="success")
         logger.info("LangSmith trace sent successfully")
     except Exception as e:
         logger.warning(f"LangSmith trace failed: {e}")
@@ -194,7 +193,7 @@ def log_llm_call(
     try:
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
 
-        run = client.create_run(
+        client.create_run(
             name=f"llm_{prompt_name}",
             run_type="llm",
             inputs={"text": input_text[:1000], "prompt_version": prompt_version},
@@ -207,7 +206,6 @@ def log_llm_call(
             },
             project_name=project,
         )
-        client.update_run(run.id, status="success")
     except Exception as e:
         logger.warning(f"LangSmith log_llm_call failed: {e}")
 
@@ -244,7 +242,7 @@ def log_evaluation_result(
     try:
         project = os.environ.get("LANGCHAIN_PROJECT", "ai-meeting-assistant")
 
-        run = client.create_run(
+        client.create_run(
             name=f"eval_{prompt_name}",
             run_type="chain",
             inputs={
@@ -255,6 +253,5 @@ def log_evaluation_result(
             extra={"prompt_version": prompt_version},
             project_name=project,
         )
-        client.update_run(run.id, status="success")
     except Exception as e:
         logger.warning(f"LangSmith log_evaluation_result failed: {e}")
